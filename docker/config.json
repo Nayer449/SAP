@@ -24,7 +24,7 @@
       "port": 10000
     },
     "authentication": {
-      "enabled": false,
+      "enabled": true,
       "type": "protocol-basic-auth",
       "username": "admin",
       "password": "admin"
