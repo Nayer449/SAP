@@ -21,7 +21,8 @@
     "enabled": true,
     "type": "ws",
     "options": {
-      "host": "::"
+      "host": "::",
+      "port": 10000
     },
     "authentication": {
       "enabled": true,
