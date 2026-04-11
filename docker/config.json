@@ -31,7 +31,7 @@
     }
   },
   "stationTemplateUrls": [
-    { "file": "virtual-simple-atg.station-template.json", "numberOfStations": 10 },
+    { "file": "virtual-simple-atg.station-template.json", "numberOfStations": 0 },
     { "file": "virtual-simple.station-template.json", "numberOfStations": 0 },
     { "file": "virtual.station-template.json", "numberOfStations": 0 },
     { "file": "keba.station-template.json", "numberOfStations": 0 },
