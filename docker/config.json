@@ -13,12 +13,16 @@
     "poolMinSize": 4,
     "poolMaxSize": 16
   },
+  "performanceStorage": {
+    "enabled": true,
+    "type": "none"
+  },
   "uiServer": {
     "enabled": true,
+    "type": "ws",
     "options": {
       "host": "::"
     },
-    "type": "ws",
     "authentication": {
       "enabled": true,
       "type": "protocol-basic-auth",
@@ -27,29 +31,10 @@
     }
   },
   "stationTemplateUrls": [
-    {
-      "file": "siemens.station-template.json",
-      "numberOfStations": 0
-    },
-    {
-      "file": "keba.station-template.json",
-      "numberOfStations": 0
-    },
-    {
-      "file": "abb.station-template.json",
-      "numberOfStations": 0
-    },
-    {
-      "file": "evlink.station-template.json",
-      "numberOfStations": 0
-    },
-    {
-      "file": "schneider.station-template.json",
-      "numberOfStations": 0
-    },
-    {
-      "file": "virtual-simple-atg.station-template.json",
-      "numberOfStations": 10
-    }
+    { "file": "virtual-simple-atg.station-template.json", "numberOfStations": 10 },
+    { "file": "virtual-simple.station-template.json", "numberOfStations": 0 },
+    { "file": "virtual.station-template.json", "numberOfStations": 0 },
+    { "file": "keba.station-template.json", "numberOfStations": 0 },
+    { "file": "schneider.station-template.json", "numberOfStations": 0 }
   ]
 }
