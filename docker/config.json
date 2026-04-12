@@ -24,7 +24,7 @@
     },
     "type": "ws",
     "authentication": {
-      "enabled": true
+      "enabled": true,
       "type": "protocol-basic-auth",
       "username": "admin",
       "password": "admin"
