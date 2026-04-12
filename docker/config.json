@@ -19,10 +19,10 @@
   },
   "uiServer": {
     "enabled": true,
-    "options": {
-      "host": "::",
-    },
     "type": "ws",
+    "options": {
+      "host": "::"
+    },
     "authentication": {
       "enabled": true,
       "type": "protocol-basic-auth",
