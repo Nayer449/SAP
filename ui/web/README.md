@@ -6,10 +6,10 @@
 
 Vue.js dashboard for monitoring and controlling the e-mobility charging stations simulator via WebSocket.
 
-![Web UI](./src/assets/webui.png)
+![Web UI](./src/assets/screenshot.png)
 
-1. The top bar lets you switch between UI servers, start/stop the simulator, add charging stations, and refresh the view.
-2. Each charging station is a table row with actions: start, stop, open/close connection, start/stop transaction, and more.
+1. The top bar lets you switch between UI servers, start/stop the simulator, add charging stations, and select themes and skins.
+2. Each charging station is a card with status indicators, connector details, and actions: start, stop, open/close connection, start/stop transaction, and more.
 
 ## Table of contents
 
@@ -20,6 +20,7 @@ Vue.js dashboard for monitoring and controlling the e-mobility charging stations
     - [Multiple servers](#multiple-servers)
   - [Configuration reference](#configuration-reference)
 - [Theming](#theming)
+- [Skins](#skins)
 - [Getting started](#getting-started)
   - [Install dependencies](#install-dependencies)
   - [Development](#development)
@@ -122,6 +123,7 @@ The `uiServer` field accepts an array to connect to multiple simulator instances
 
 | Field                     | Type                    | Required | Description                               |
 | ------------------------- | ----------------------- | -------- | ----------------------------------------- |
+| `skin`                    | `string`                | No       | Skin name (default: `modern`)             |
 | `theme`                   | `string`                | No       | Theme name (default: `tokyo-night-storm`) |
 | `host`                    | `string`                | Yes      | Simulator UI server hostname              |
 | `port`                    | `number`                | Yes      | Simulator UI server port                  |
@@ -141,10 +143,26 @@ Set `theme` in `config.json` to a filename (without `.css`) from `src/assets/the
 | Theme               | Style | Source                                                           |
 | ------------------- | ----- | ---------------------------------------------------------------- |
 | `tokyo-night-storm` | Dark  | [Tokyo Night](https://github.com/enkia/tokyo-night-vscode-theme) |
+| `dracula`           | Dark  | [Dracula](https://github.com/dracula/dracula-theme)              |
+| `gruvbox-dark`      | Dark  | [Gruvbox](https://github.com/morhetz/gruvbox)                    |
+| `rose-pine`         | Dark  | [Rosé Pine](https://github.com/rose-pine/rose-pine-theme)        |
+| `teal-dark`         | Dark  | Material Teal                                                    |
+| `teal-light`        | Light | Material Teal                                                    |
 | `catppuccin-latte`  | Light | [Catppuccin](https://github.com/catppuccin/catppuccin)           |
 | `sap-horizon`       | Light | [SAP Horizon](https://github.com/SAP/theming-base-content)       |
 
-Default: `tokyo-night-storm`. To add a theme, create a CSS file defining the same semantic tokens.
+Default: `tokyo-night-storm`. To add a theme, create a CSS file in this directory defining all required CSS custom properties (see `src/shared/tokens/contract.ts` for the full list).
+
+## Skins
+
+Set `skin` in `config.json` to select the default UI layout. Users can switch skins at runtime using the selector in the top bar.
+
+| Skin      | Layout                                            |
+| --------- | ------------------------------------------------- |
+| `classic` | Table-based rows with a sticky sidebar for forms. |
+| `modern`  | Responsive card grid with modal dialogs.          |
+
+Default: `modern`. To add a skin, create `src/skins/<name>/`, implement a root layout component, and register it in `src/skins/registry.ts`.
 
 ## Getting started
 

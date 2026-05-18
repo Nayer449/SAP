@@ -7,6 +7,7 @@ import { isAsyncFunction } from './Utils.js'
 export enum AsyncLockType {
   configuration = 'configuration',
   performance = 'performance',
+  simulatorState = 'simulatorState',
 }
 
 type ResolveType = (value: PromiseLike<void> | void) => void
@@ -21,13 +22,16 @@ export class AsyncLock {
     this.resolveQueue = new Queue<ResolveType>()
   }
 
-  public static async runExclusive<T>(type: AsyncLockType, fn: () => Promise<T> | T): Promise<T> {
+  public static async runExclusive<T>(
+    type: AsyncLockType,
+    fn: (() => Promise<T>) | (() => T)
+  ): Promise<T> {
     try {
       await AsyncLock.acquire(type)
       if (isAsyncFunction(fn)) {
         return await fn()
       } else {
-        return fn() as T
+        return fn()
       }
     } finally {
       AsyncLock.release(type)

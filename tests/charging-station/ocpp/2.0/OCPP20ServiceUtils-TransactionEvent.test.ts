@@ -1971,6 +1971,11 @@ await describe('OCPP20 TransactionEvent ServiceUtils', async () => {
 
         errorStation.isWebSocketConnectionOpened = () => true
 
+        const connectorStatus = errorStation.getConnectorStatus(connectorId)
+        if (connectorStatus != null) {
+          connectorStatus.transactionStarted = true
+        }
+
         await OCPP20ServiceUtils.sendQueuedTransactionEvents(errorStation, connectorId)
 
         assert.strictEqual(callCount, 4)
@@ -2594,7 +2599,7 @@ await describe('OCPP20 TransactionEvent ServiceUtils', async () => {
       }
 
       const originalSend = OCPP20ServiceUtils.sendTransactionEvent.bind(OCPP20ServiceUtils)
-      const sendMock = mock.method(OCPP20ServiceUtils, 'sendTransactionEvent', () => {
+      const sendMock = mock.method(OCPP20ServiceUtils, 'sendTransactionEvent', async () => {
         sendMock.mock.restore()
         OCPP20ServiceUtils.sendTransactionEvent = originalSend
         return Promise.reject(new Error('Network failure'))

@@ -15,6 +15,7 @@ import { getRandomValues, randomBytes, randomUUID } from 'node:crypto'
 import { env } from 'node:process'
 
 import {
+  type JsonObject,
   type JsonType,
   MapStringifyFormat,
   MessageType,
@@ -29,6 +30,18 @@ type ReadonlyNonEmptyArray<T> = readonly [T, ...(readonly T[])]
 
 export const logPrefix = (prefixString = ''): string => {
   return `${new Date().toLocaleString()}${prefixString}`
+}
+
+/**
+ * Formats a log prefix for direct concatenation with a module/method tag.
+ * @param logPrefixFn - Prefix-producing function. Defaults to `logPrefix` so callers without a
+ *                     module-specific prefix still emit a timestamped log line.
+ * @returns The prefix followed by a single trailing space (e.g. `"<prefix> "`). The trailing space is part of the
+ *          contract: call sites concatenate the result directly with the message body, e.g.
+ *          `` `${formatLogPrefix(fn)}${moduleName}.method: ...` ``.
+ */
+export const formatLogPrefix = (logPrefixFn: () => string = logPrefix): string => {
+  return `${logPrefixFn()} `
 }
 
 export const once = <A extends unknown[], R>(fn: (...args: A) => R): ((...args: A) => R) => {
@@ -55,19 +68,35 @@ export const has = (property: PropertyKey, object: unknown): boolean => {
   if (object == null || (typeof object !== 'object' && typeof object !== 'function')) {
     return false
   }
-  return Object.hasOwn(object as Record<PropertyKey, unknown>, property)
+  return Object.hasOwn(object, property)
 }
 
-const type = (value: unknown): string => {
-  if (value === null) return 'Null'
-  if (value === undefined) return 'Undefined'
-  if (Number.isNaN(value)) return 'NaN'
-  if (Array.isArray(value)) return 'Array'
-  return Object.prototype.toString.call(value).slice(8, -1)
+const isPlainObject = (value: unknown): value is object => {
+  return Object.prototype.toString.call(value) === '[object Object]'
 }
 
-const isObject = (value: unknown): value is object => {
-  return type(value) === 'Object'
+export const isJsonObject = (value: unknown): value is JsonObject => {
+  return isPlainObject(value)
+}
+
+/**
+ * Asserts that the given value is a JSON object (non-null, non-array object).
+ * @param value - Value to assert.
+ * @param error - Optional custom error or context message.
+ * @throws {Error | TypeError} The provided error, or a TypeError with the context message.
+ */
+export function assertIsJsonObject (
+  value: unknown,
+  error?: Error | string
+): asserts value is JsonObject {
+  if (!isJsonObject(value)) {
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new TypeError(
+      error != null ? `Expected a JSON object: ${error}` : 'Expected a JSON object'
+    )
+  }
 }
 
 export const isEmpty = (value: unknown): boolean => {
@@ -84,7 +113,7 @@ export const isEmpty = (value: unknown): boolean => {
   if (Array.isArray(value)) return value.length === 0
   if (value instanceof Map) return value.size === 0
   if (value instanceof Set) return value.size === 0
-  if (isObject(value)) return Object.keys(value).length === 0
+  if (isPlainObject(value)) return Object.keys(value).length === 0
   return false
 }
 
@@ -92,11 +121,11 @@ export const isEmpty = (value: unknown): boolean => {
 export const mergeDeepRight = <T extends object, S extends object>(target: T, source: S): T => {
   const output: Record<string, unknown> = { ...(target as Record<string, unknown>) }
 
-  if (isObject(target) && isObject(source)) {
-    Object.keys(source as Record<string, unknown>).forEach(key => {
+  if (isPlainObject(target) && isPlainObject(source)) {
+    Object.keys(source).forEach(key => {
       const sourceValue = (source as Record<string, unknown>)[key]
       const targetValue = (target as Record<string, unknown>)[key]
-      if (isObject(sourceValue) && isObject(targetValue)) {
+      if (isPlainObject(sourceValue) && isPlainObject(targetValue)) {
         output[key] = mergeDeepRight(
           targetValue as Record<string, unknown>,
           sourceValue as Record<string, unknown>
@@ -487,11 +516,11 @@ export const getWebSocketCloseEventStatusString = (code: number): string => {
       return '(For applications)'
     }
   }
-  if (
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    WebSocketCloseEventStatusString[code as keyof typeof WebSocketCloseEventStatusString] != null
-  ) {
-    return WebSocketCloseEventStatusString[code as keyof typeof WebSocketCloseEventStatusString]
+  const statusString = (
+    WebSocketCloseEventStatusString as Readonly<Record<number, string | undefined>>
+  )[code]
+  if (statusString != null) {
+    return statusString
   }
   return '(Unknown)'
 }

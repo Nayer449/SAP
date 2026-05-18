@@ -212,7 +212,7 @@ export const convertDateToISOString = <T extends JsonType>(object: T): void => {
         const item = value[i]
         if (isDate(item)) {
           try {
-            value[i] = item.toISOString() as unknown as typeof item
+            value[i] = item.toISOString()
           } catch {
             // Ignore date conversion error
           }
@@ -656,7 +656,9 @@ const buildPowerMeasurandValue = (
       }, cannot calculate ${
         powerTemplate.measurand ?? MeterValueMeasurand.ENERGY_ACTIVE_IMPORT_REGISTER
       } measurand value`
-      logger.error(`${chargingStation.logPrefix()} ${errorMsg}`)
+      logger.error(
+        `${chargingStation.logPrefix()} ${moduleName}.buildPowerMeasurandValue: ${errorMsg}`
+      )
       throw new OCPPError(ErrorType.INTERNAL_ERROR, errorMsg, RequestCommand.METER_VALUES)
     }
   }
@@ -855,7 +857,9 @@ const buildCurrentMeasurandValue = (
       }, cannot calculate ${
         currentTemplate.measurand ?? MeterValueMeasurand.ENERGY_ACTIVE_IMPORT_REGISTER
       } measurand value`
-      logger.error(`${chargingStation.logPrefix()} ${errorMsg}`)
+      logger.error(
+        `${chargingStation.logPrefix()} ${moduleName}.buildCurrentMeasurandValue: ${errorMsg}`
+      )
       throw new OCPPError(ErrorType.INTERNAL_ERROR, errorMsg, RequestCommand.METER_VALUES)
     }
   }
@@ -1295,13 +1299,17 @@ const checkMeasurandPowerDivider = (
     const errorMsg = `MeterValues measurand ${
       measurandType ?? MeterValueMeasurand.ENERGY_ACTIVE_IMPORT_REGISTER
     }: powerDivider is undefined`
-    logger.error(`${chargingStation.logPrefix()} ${errorMsg}`)
+    logger.error(
+      `${chargingStation.logPrefix()} ${moduleName}.checkMeasurandPowerDivider: ${errorMsg}`
+    )
     throw new OCPPError(ErrorType.INTERNAL_ERROR, errorMsg, RequestCommand.METER_VALUES)
   } else if (chargingStation.powerDivider <= 0) {
     const errorMsg = `MeterValues measurand ${
       measurandType ?? MeterValueMeasurand.ENERGY_ACTIVE_IMPORT_REGISTER
-    }: powerDivider have zero or below value ${chargingStation.powerDivider.toString()}`
-    logger.error(`${chargingStation.logPrefix()} ${errorMsg}`)
+    }: powerDivider has a value of zero or less ${chargingStation.powerDivider.toString()}`
+    logger.error(
+      `${chargingStation.logPrefix()} ${moduleName}.checkMeasurandPowerDivider: ${errorMsg}`
+    )
     throw new OCPPError(ErrorType.INTERNAL_ERROR, errorMsg, RequestCommand.METER_VALUES)
   }
 }
@@ -1343,7 +1351,7 @@ const getLimitFromSampledValueTemplateCustomValue = (
 
 const isMeasurandSupported = (measurand: MeterValueMeasurand): boolean => {
   const supportedMeasurands = OCPPConstants.OCPP_MEASURANDS_SUPPORTED as readonly string[]
-  return supportedMeasurands.includes(measurand as string)
+  return supportedMeasurands.includes(measurand)
 }
 
 /**
@@ -1367,7 +1375,7 @@ export const getSampledValueTemplate = (
   const onPhaseStr = phase != null ? `on phase ${phase} ` : ''
   if (!isMeasurandSupported(measurand)) {
     logger.warn(
-      `${chargingStation.logPrefix()} Trying to get unsupported MeterValues measurand '${measurand}' ${onPhaseStr}in template on connector id ${connectorId.toString()}`
+      `${chargingStation.logPrefix()} ${moduleName}.getSampledValueTemplate: Trying to get unsupported MeterValues measurand '${measurand}' ${onPhaseStr}in template on connector id ${connectorId.toString()}`
     )
     return
   }
@@ -1376,7 +1384,7 @@ export const getSampledValueTemplate = (
     getConfigurationKey(chargingStation, measurandsKey)?.value?.includes(measurand) === false
   ) {
     logger.debug(
-      `${chargingStation.logPrefix()} Trying to get MeterValues measurand '${measurand}' ${onPhaseStr}in template on connector id ${connectorId.toString()} not found in sampled data OCPP parameter`
+      `${chargingStation.logPrefix()} ${moduleName}.getSampledValueTemplate: Trying to get MeterValues measurand '${measurand}' ${onPhaseStr}in template on connector id ${connectorId.toString()} not found in sampled data OCPP parameter`
     )
     return
   }
@@ -1410,7 +1418,7 @@ export const getSampledValueTemplate = (
       )
     ) {
       logger.warn(
-        `${chargingStation.logPrefix()} Unsupported MeterValues measurand '${measurand}' ${onPhaseStr}in template on connector id ${connectorId.toString()}`
+        `${chargingStation.logPrefix()} ${moduleName}.getSampledValueTemplate: Unsupported MeterValues measurand '${measurand}' ${onPhaseStr}in template on connector id ${connectorId.toString()}`
       )
     } else if (
       phase != null &&
@@ -1436,11 +1444,13 @@ export const getSampledValueTemplate = (
   }
   if (measurand === MeterValueMeasurand.ENERGY_ACTIVE_IMPORT_REGISTER) {
     const errorMsg = `Missing MeterValues for default measurand '${measurand}' in template on connector id ${connectorId.toString()}`
-    logger.error(`${chargingStation.logPrefix()} ${errorMsg}`)
+    logger.error(
+      `${chargingStation.logPrefix()} ${moduleName}.getSampledValueTemplate: ${errorMsg}`
+    )
     throw new BaseError(errorMsg)
   }
   logger.debug(
-    `${chargingStation.logPrefix()} No MeterValues for measurand '${measurand}' ${onPhaseStr}in template on connector id ${connectorId.toString()}`
+    `${chargingStation.logPrefix()} ${moduleName}.getSampledValueTemplate: No MeterValues for measurand '${measurand}' ${onPhaseStr}in template on connector id ${connectorId.toString()}`
   )
 }
 
@@ -1466,18 +1476,12 @@ export const resolveSampledValueFields = (
   value: number
 } => {
   const sampledValueMeasurand =
-    (sampledValueTemplate.measurand as MeterValueMeasurand | undefined) ??
-    MeterValueMeasurand.ENERGY_ACTIVE_IMPORT_REGISTER
+    sampledValueTemplate.measurand ?? MeterValueMeasurand.ENERGY_ACTIVE_IMPORT_REGISTER
   return {
-    context:
-      context ??
-      (sampledValueTemplate.context as MeterValueContext | undefined) ??
-      MeterValueContext.SAMPLE_PERIODIC,
-    location:
-      (sampledValueTemplate.location as MeterValueLocation | undefined) ??
-      getMeasurandDefaultLocation(sampledValueMeasurand),
+    context: context ?? sampledValueTemplate.context ?? MeterValueContext.SAMPLE_PERIODIC,
+    location: sampledValueTemplate.location ?? getMeasurandDefaultLocation(sampledValueMeasurand),
     measurand: sampledValueMeasurand,
-    phase: phase ?? (sampledValueTemplate.phase as MeterValuePhase | undefined),
+    phase: phase ?? sampledValueTemplate.phase,
     unit:
       (sampledValueTemplate.unit as MeterValueUnit | undefined) ??
       getMeasurandDefaultUnit(sampledValueMeasurand),
@@ -1644,7 +1648,7 @@ export function isConnectorIdValid (
 ): boolean {
   if (connectorId < 0) {
     logger.error(
-      `${chargingStation.logPrefix()} ${ocppCommand} incoming request received with invalid connector id ${connectorId.toString()}`
+      `${chargingStation.logPrefix()} ${moduleName}.isConnectorIdValid: ${ocppCommand} incoming request received with invalid connector id ${connectorId.toString()}`
     )
     return false
   }
@@ -1673,7 +1677,9 @@ export function isIncomingRequestCommandSupported (
   ) {
     return chargingStation.stationInfo.commandsSupport.incomingCommands[command]
   }
-  logger.error(`${chargingStation.logPrefix()} Unknown incoming OCPP command '${command}'`)
+  logger.warn(
+    `${chargingStation.logPrefix()} ${moduleName}.isIncomingRequestCommandSupported: Unknown incoming OCPP command '${command}'`
+  )
   return false
 }
 
@@ -1697,8 +1703,8 @@ export function isMessageTriggerSupported (
   ) {
     return chargingStation.stationInfo.messageTriggerSupport[messageTrigger]
   }
-  logger.error(
-    `${chargingStation.logPrefix()} Unknown incoming OCPP message trigger '${messageTrigger}'`
+  logger.warn(
+    `${chargingStation.logPrefix()} ${moduleName}.isMessageTriggerSupported: Unknown incoming OCPP message trigger '${messageTrigger}'`
   )
   return false
 }
@@ -1721,7 +1727,9 @@ export function isRequestCommandSupported (
   ) {
     return chargingStation.stationInfo.commandsSupport.outgoingCommands[command]
   }
-  logger.error(`${chargingStation.logPrefix()} Unknown outgoing OCPP command '${command}'`)
+  logger.error(
+    `${chargingStation.logPrefix()} ${moduleName}.isRequestCommandSupported: Unknown outgoing OCPP command '${command}'`
+  )
   return false
 }
 

@@ -44,6 +44,7 @@ import {
   CurrentType,
   type EvseTemplate,
   OCPPVersion,
+  PowerUnits,
   RecurrencyKindType,
   type Reservation,
   ReservationTerminationReason,
@@ -81,20 +82,25 @@ export const buildTemplateName = (templateFile: string): string => {
   return join(templateFileParsedPath.dir, templateFileParsedPath.name)
 }
 
+export type ChargingStationNameTemplate = Pick<
+  ChargingStationTemplate,
+  'baseName' | 'fixedName' | 'nameSuffix'
+>
+
 export const getChargingStationId = (
   index: number,
-  stationTemplate: ChargingStationTemplate | undefined
+  nameTemplate: ChargingStationNameTemplate | undefined
 ): string => {
-  if (stationTemplate == null) {
+  if (nameTemplate == null) {
     return "Unknown 'chargingStationId'"
   }
   // In case of multiple instances: add instance index to charging station id
   const instanceIndex = env.CF_INSTANCE_INDEX ?? 0
-  const idSuffix = stationTemplate.nameSuffix ?? ''
+  const idSuffix = nameTemplate.nameSuffix ?? ''
   const idStr = `000000000${index.toString()}`
-  return stationTemplate.fixedName === true
-    ? stationTemplate.baseName
-    : `${stationTemplate.baseName}-${instanceIndex.toString()}${idStr.substring(
+  return nameTemplate.fixedName === true
+    ? nameTemplate.baseName
+    : `${nameTemplate.baseName}-${instanceIndex.toString()}${idStr.substring(
         idStr.length - 4
       )}${idSuffix}`
 }
@@ -156,7 +162,11 @@ export const removeExpiredReservations = async (
   }
 }
 
-export const getHashId = (index: number, stationTemplate: ChargingStationTemplate): string => {
+export const getHashId = (
+  index: number,
+  stationTemplate: ChargingStationTemplate,
+  chargingStationIdOverride?: string
+): string => {
   const chargingStationInfo = {
     chargePointModel: stationTemplate.chargePointModel,
     chargePointVendor: stationTemplate.chargePointVendor,
@@ -175,7 +185,9 @@ export const getHashId = (index: number, stationTemplate: ChargingStationTemplat
   }
   return hash(
     Constants.DEFAULT_HASH_ALGORITHM,
-    `${JSON.stringify(chargingStationInfo)}${getChargingStationId(index, stationTemplate)}`,
+    `${JSON.stringify(chargingStationInfo)}${
+      chargingStationIdOverride ?? getChargingStationId(index, stationTemplate)
+    }`,
     'hex'
   )
 }
@@ -246,7 +258,9 @@ export const checkChargingStationState = (
   logPrefix: string
 ): boolean => {
   if (!chargingStation.started && !chargingStation.starting) {
-    logger.warn(`${logPrefix} charging station is stopped, cannot proceed`)
+    logger.warn(
+      `${logPrefix} ${moduleName}.checkChargingStationState: Charging station is stopped, cannot proceed`
+    )
     return false
   }
   return true
@@ -277,7 +291,38 @@ export const getMaxNumberOfEvses = (evses: Record<string, EvseTemplate> | undefi
   return isEmpty(evses) ? 0 : Object.keys(evses).length
 }
 
-const getMaxNumberOfConnectors = (
+export const getDefaultConnectorMaximumPower = (
+  stationTemplate: ChargingStationTemplate
+): number | undefined => {
+  let maximumPower: number | undefined
+  if (isNotEmptyArray<number>(stationTemplate.power)) {
+    const powerArrayRandomIndex = Math.floor(secureRandom() * stationTemplate.power.length)
+    maximumPower =
+      stationTemplate.powerUnit === PowerUnits.KILO_WATT
+        ? stationTemplate.power[powerArrayRandomIndex] * 1000
+        : stationTemplate.power[powerArrayRandomIndex]
+  } else if (typeof stationTemplate.power === 'number') {
+    maximumPower =
+      stationTemplate.powerUnit === PowerUnits.KILO_WATT
+        ? stationTemplate.power * 1000
+        : stationTemplate.power
+  }
+  if (maximumPower == null) {
+    return undefined
+  }
+  if (stationTemplate.powerSharedByConnectors === true) {
+    return maximumPower
+  }
+  const staticCount =
+    stationTemplate.Evses != null
+      ? // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      getMaxNumberOfEvses(stationTemplate.Evses) - (stationTemplate.Evses['0'] != null ? 1 : 0)
+      : getMaxNumberOfConnectors(stationTemplate.Connectors) -
+        (stationTemplate.Connectors?.['0'] != null ? 1 : 0)
+  return staticCount > 0 ? maximumPower / staticCount : undefined
+}
+
+export const getMaxNumberOfConnectors = (
   connectors: Record<string, ConnectorStatus> | undefined
 ): number => {
   if (connectors == null) {
@@ -306,28 +351,6 @@ export const getBootConnectorStatus = (
   return ConnectorStatusEnum.Available
 }
 
-export const checkTemplate = (
-  stationTemplate: ChargingStationTemplate | undefined,
-  logPrefix: string,
-  templateFile: string
-): void => {
-  if (stationTemplate == null) {
-    const errorMsg = `Failed to read charging station template file ${templateFile}`
-    logger.error(`${logPrefix} ${errorMsg}`)
-    throw new BaseError(errorMsg)
-  }
-  if (isEmpty(stationTemplate)) {
-    const errorMsg = `Empty charging station information from template file ${templateFile}`
-    logger.error(`${logPrefix} ${errorMsg}`)
-    throw new BaseError(errorMsg)
-  }
-  if (stationTemplate.idTagsFile == null || isEmpty(stationTemplate.idTagsFile)) {
-    logger.warn(
-      `${logPrefix} Missing id tags file in template file ${templateFile}. That can lead to issues with the Automatic Transaction Generator`
-    )
-  }
-}
-
 export const checkConfiguration = (
   stationConfiguration: ChargingStationConfiguration | undefined,
   logPrefix: string,
@@ -335,75 +358,13 @@ export const checkConfiguration = (
 ): void => {
   if (stationConfiguration == null) {
     const errorMsg = `Failed to read charging station configuration file ${configurationFile}`
-    logger.error(`${logPrefix} ${errorMsg}`)
+    logger.error(`${logPrefix} ${moduleName}.checkConfiguration: ${errorMsg}`)
     throw new BaseError(errorMsg)
   }
   if (isEmpty(stationConfiguration)) {
     const errorMsg = `Empty charging station configuration from file ${configurationFile}`
-    logger.error(`${logPrefix} ${errorMsg}`)
+    logger.error(`${logPrefix} ${moduleName}.checkConfiguration: ${errorMsg}`)
     throw new BaseError(errorMsg)
-  }
-}
-
-export const checkConnectorsConfiguration = (
-  stationTemplate: ChargingStationTemplate,
-  logPrefix: string,
-  templateFile: string
-): {
-  configuredMaxConnectors: number
-  templateMaxAvailableConnectors: number
-  templateMaxConnectors: number
-} => {
-  const configuredMaxConnectors = getConfiguredMaxNumberOfConnectors(stationTemplate)
-  checkConfiguredMaxConnectors(configuredMaxConnectors, logPrefix, templateFile)
-  const templateMaxConnectors = getMaxNumberOfConnectors(stationTemplate.Connectors)
-  checkTemplateMaxConnectors(templateMaxConnectors, logPrefix, templateFile)
-  const templateMaxAvailableConnectors =
-    stationTemplate.Connectors?.[0] != null ? templateMaxConnectors - 1 : templateMaxConnectors
-  if (
-    configuredMaxConnectors > templateMaxAvailableConnectors &&
-    stationTemplate.randomConnectors !== true
-  ) {
-    logger.warn(
-      `${logPrefix} Number of connectors exceeds the number of connector configurations in template ${templateFile}, forcing random connector configurations affectation`
-    )
-    stationTemplate.randomConnectors = true
-  }
-  return {
-    configuredMaxConnectors,
-    templateMaxAvailableConnectors,
-    templateMaxConnectors,
-  }
-}
-
-export const checkEvsesConfiguration = (
-  stationTemplate: ChargingStationTemplate,
-  logPrefix: string,
-  templateFile: string
-): void => {
-  if (stationTemplate.Evses == null) {
-    return
-  }
-  for (const evseKey in stationTemplate.Evses) {
-    const evseId = convertToInt(evseKey)
-    const connectorIds = Object.keys(stationTemplate.Evses[evseKey].Connectors).map(convertToInt)
-    if (evseId === 0) {
-      for (const connectorId of connectorIds) {
-        if (connectorId !== 0) {
-          throw new BaseError(
-            `${logPrefix} Template ${templateFile} EVSE 0 has invalid connector id ${connectorId.toString()}, only connector id 0 is allowed (OCPP 2.0.1 §7.2)`
-          )
-        }
-      }
-    } else if (evseId > 0) {
-      for (const connectorId of connectorIds) {
-        if (connectorId < 1) {
-          throw new BaseError(
-            `${logPrefix} Template ${templateFile} EVSE ${evseId.toString()} has invalid connector id ${connectorId.toString()}, connector ids must start at 1 (OCPP 2.0.1 §7.2)`
-          )
-        }
-      }
-    }
   }
 }
 
@@ -415,7 +376,7 @@ export const checkStationInfoConnectorStatus = (
 ): void => {
   if (connectorStatus.status != null) {
     logger.warn(
-      `${logPrefix} Charging station information from template ${templateFile} with connector id ${connectorId.toString()} status configuration defined, undefine it`
+      `${logPrefix} ${moduleName}.checkStationInfoConnectorStatus: Charging station information from template ${templateFile} with connector id ${connectorId.toString()} status configuration defined, removing it`
     )
     delete connectorStatus.status
   }
@@ -427,6 +388,12 @@ export const setChargingStationOptions = (
 ): ChargingStationInfo => {
   if (options?.supervisionUrls != null) {
     stationInfo.supervisionUrls = options.supervisionUrls
+  }
+  if (options?.supervisionUser != null) {
+    stationInfo.supervisionUser = options.supervisionUser
+  }
+  if (options?.supervisionPassword != null) {
+    stationInfo.supervisionPassword = options.supervisionPassword
   }
   if (options?.persistentConfiguration != null) {
     stationInfo.stationInfoPersistentConfiguration = options.persistentConfiguration
@@ -449,6 +416,15 @@ export const setChargingStationOptions = (
   if (options?.stopTransactionsOnStopped != null) {
     stationInfo.stopTransactionsOnStopped = options.stopTransactionsOnStopped
   }
+  if (options?.baseName != null) {
+    stationInfo.baseName = options.baseName
+  }
+  if (options?.fixedName != null) {
+    stationInfo.fixedName = options.fixedName
+  }
+  if (options?.nameSuffix != null) {
+    stationInfo.nameSuffix = options.nameSuffix
+  }
   return stationInfo
 }
 
@@ -466,7 +442,7 @@ export const buildConnectorsMap = (
     }
   } else {
     logger.warn(
-      `${logPrefix} Charging station information from template ${templateFile} with no connectors, cannot build connectors map`
+      `${logPrefix} ${moduleName}.buildConnectorsMap: Charging station information from template ${templateFile} with no connectors, cannot build connectors map`
     )
   }
   return connectorsMap
@@ -474,20 +450,31 @@ export const buildConnectorsMap = (
 
 export const initializeConnectorsMapStatus = (
   connectors: Map<number, ConnectorStatus>,
-  logPrefix: string
+  logPrefix: string,
+  defaultMaximumPower?: number
 ): void => {
   for (const [connectorId, connectorStatus] of connectors) {
     if (connectorId > 0 && connectorStatus.transactionStarted === true) {
-      logger.warn(
-        // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
-        `${logPrefix} Connector id ${connectorId.toString()} at initialization has a transaction started with id ${connectorStatus.transactionId?.toString()}`
-      )
+      if (
+        connectorStatus.transactionId == null ||
+        connectorStatus.status === ConnectorStatusEnum.Finishing
+      ) {
+        resetConnectorStatus(connectorStatus)
+        connectorStatus.locked = false
+        logger.warn(
+          `${logPrefix} ${moduleName}.initializeConnectorsMapStatus: Connector id ${connectorId.toString()} at initialization has stale transaction state, resetting`
+        )
+      } else {
+        logger.warn(
+          `${logPrefix} ${moduleName}.initializeConnectorsMapStatus: Connector id ${connectorId.toString()} at initialization has a transaction started with id ${connectorStatus.transactionId.toString()}`
+        )
+      }
     }
     if (connectorId === 0) {
       connectorStatus.availability = AvailabilityType.Operative
       connectorStatus.chargingProfiles ??= []
     } else if (connectorId > 0 && connectorStatus.transactionStarted == null) {
-      initializeConnectorStatus(connectorStatus)
+      initializeConnectorStatus(connectorStatus, defaultMaximumPower)
     }
   }
 }
@@ -563,29 +550,6 @@ export const prepareConnectorStatus = (connectorStatus: ConnectorStatus): Connec
       })
   }
   return connectorStatus
-}
-
-export const warnTemplateKeysDeprecation = (
-  stationTemplate: ChargingStationTemplate,
-  logPrefix: string,
-  templateFile: string
-): void => {
-  const templateKeys: { deprecatedKey: string; key?: string }[] = [
-    { deprecatedKey: 'supervisionUrl', key: 'supervisionUrls' },
-    { deprecatedKey: 'authorizationFile', key: 'idTagsFile' },
-    { deprecatedKey: 'payloadSchemaValidation', key: 'ocppStrictCompliance' },
-    { deprecatedKey: 'mustAuthorizeAtRemoteStart', key: 'remoteAuthorization' },
-  ]
-  for (const templateKey of templateKeys) {
-    warnDeprecatedTemplateKey(
-      stationTemplate,
-      templateKey.deprecatedKey,
-      logPrefix,
-      templateFile,
-      templateKey.key != null ? `Use '${templateKey.key}' instead` : undefined
-    )
-    convertDeprecatedTemplateKey(stationTemplate, templateKey.deprecatedKey, templateKey.key)
-  }
 }
 
 export const stationTemplateToStationInfo = (
@@ -770,7 +734,9 @@ export const getConnectorChargingProfilesLimit = (
       if (maximumPower == null) {
         return limit
       }
-      const connectorMaximumPower = maximumPower / (chargingStation.powerDivider ?? 1)
+      const connectorMaximumPower =
+        chargingStation.getConnectorStatus(connectorId)?.maximumPower ??
+        maximumPower / (chargingStation.powerDivider ?? 1)
       if (limit > connectorMaximumPower) {
         logger.error(
           `${chargingStation.logPrefix()} ${moduleName}.getConnectorChargingProfilesLimit: Charging profile id ${getChargingProfileId(chargingProfilesLimit.chargingProfile)} limit ${limit.toString()} is greater than connector ${connectorId.toString()} maximum ${connectorMaximumPower.toString()}: %j`,
@@ -834,7 +800,7 @@ export const getDefaultVoltageOut = (
       defaultVoltageOut = Voltage.VOLTAGE_400
       break
     default:
-      logger.error(`${logPrefix} ${errorMsg}`)
+      logger.error(`${logPrefix} ${moduleName}.getDefaultVoltageOut: ${errorMsg}`)
       throw new BaseError(errorMsg)
   }
   return defaultVoltageOut
@@ -868,15 +834,15 @@ export const waitChargingStationEvents = async (
   })
 }
 
-const getConfiguredMaxNumberOfConnectors = (stationTemplate: ChargingStationTemplate): number => {
+export const getConfiguredMaxNumberOfConnectors = (
+  stationTemplate: ChargingStationTemplate
+): number => {
+  const picked = pickConfiguredNumberOfConnectors(stationTemplate.numberOfConnectors)
+  if (picked != null) {
+    return picked
+  }
   let configuredMaxNumberOfConnectors = 0
-  if (isNotEmptyArray<number>(stationTemplate.numberOfConnectors)) {
-    const numberOfConnectors = stationTemplate.numberOfConnectors
-    configuredMaxNumberOfConnectors =
-      numberOfConnectors[Math.floor(secureRandom() * numberOfConnectors.length)]
-  } else if (typeof stationTemplate.numberOfConnectors === 'number') {
-    configuredMaxNumberOfConnectors = stationTemplate.numberOfConnectors
-  } else if (stationTemplate.Connectors != null && stationTemplate.Evses == null) {
+  if (stationTemplate.Connectors != null && stationTemplate.Evses == null) {
     configuredMaxNumberOfConnectors =
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       stationTemplate.Connectors[0] != null
@@ -891,35 +857,49 @@ const getConfiguredMaxNumberOfConnectors = (stationTemplate: ChargingStationTemp
   return configuredMaxNumberOfConnectors
 }
 
-const checkConfiguredMaxConnectors = (
-  configuredMaxConnectors: number,
-  logPrefix: string,
-  templateFile: string
-): void => {
-  if (configuredMaxConnectors <= 0) {
-    logger.warn(
-      `${logPrefix} Charging station information from template ${templateFile} with ${configuredMaxConnectors.toString()} connectors`
-    )
+/**
+ * Worst-case upper bound on the configured connector count from the
+ * `numberOfConnectors` template field. Used at validation time to decide
+ * whether `randomConnectors` must be auto-enabled (i.e. whether *any*
+ * runtime random pick could exceed the connector definitions).
+ * @param numberOfConnectors - Template `numberOfConnectors` field value
+ * @returns Upper bound, or `undefined` when the field is not set
+ */
+export const getMaxConfiguredNumberOfConnectors = (
+  numberOfConnectors: number | readonly number[] | undefined
+): number | undefined => {
+  if (isNotEmptyArray<number>(numberOfConnectors)) {
+    return Math.max(...numberOfConnectors)
   }
+  if (typeof numberOfConnectors === 'number') {
+    return numberOfConnectors
+  }
+  return undefined
 }
 
-const checkTemplateMaxConnectors = (
-  templateMaxConnectors: number,
-  logPrefix: string,
-  templateFile: string
-): void => {
-  if (templateMaxConnectors === 0) {
-    logger.warn(
-      `${logPrefix} Charging station information from template ${templateFile} with empty connectors configuration`
-    )
-  } else if (templateMaxConnectors < 0) {
-    logger.error(
-      `${logPrefix} Charging station information from template ${templateFile} with no connectors configuration defined`
-    )
+/**
+ * Random pick from the `numberOfConnectors` template field. Used at
+ * runtime to materialize the actual connector count for one station
+ * instance.
+ * @param numberOfConnectors - Template `numberOfConnectors` field value
+ * @returns Picked count, or `undefined` when the field is not set
+ */
+export const pickConfiguredNumberOfConnectors = (
+  numberOfConnectors: number | readonly number[] | undefined
+): number | undefined => {
+  if (isNotEmptyArray<number>(numberOfConnectors)) {
+    return numberOfConnectors[Math.floor(secureRandom() * numberOfConnectors.length)]
   }
+  if (typeof numberOfConnectors === 'number') {
+    return numberOfConnectors
+  }
+  return undefined
 }
 
-const initializeConnectorStatus = (connectorStatus: ConnectorStatus): void => {
+const initializeConnectorStatus = (
+  connectorStatus: ConnectorStatus,
+  defaultMaximumPower?: number
+): void => {
   connectorStatus.availability = AvailabilityType.Operative
   connectorStatus.idTagLocalAuthorized = false
   connectorStatus.idTagAuthorized = false
@@ -928,35 +908,8 @@ const initializeConnectorStatus = (connectorStatus: ConnectorStatus): void => {
   connectorStatus.energyActiveImportRegisterValue = 0
   connectorStatus.transactionEnergyActiveImportRegisterValue = 0
   connectorStatus.chargingProfiles ??= []
-}
-
-const warnDeprecatedTemplateKey = (
-  template: ChargingStationTemplate,
-  key: string,
-  logPrefix: string,
-  templateFile: string,
-  logMsgToAppend = ''
-): void => {
-  if (template[key as keyof ChargingStationTemplate] != null) {
-    const logMsg = `Deprecated template key '${key}' usage in file '${templateFile}'${
-      isNotEmptyString(logMsgToAppend) ? `. ${logMsgToAppend}` : ''
-    }`
-    logger.warn(`${logPrefix} ${logMsg}`)
-  }
-}
-
-const convertDeprecatedTemplateKey = (
-  template: ChargingStationTemplate,
-  deprecatedKey: string,
-  key?: string
-): void => {
-  const templateRecord = template as unknown as Record<string, unknown>
-  if (templateRecord[deprecatedKey] != null) {
-    if (key != null) {
-      templateRecord[key] = templateRecord[deprecatedKey]
-    }
-    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-    delete templateRecord[deprecatedKey]
+  if (defaultMaximumPower != null) {
+    connectorStatus.maximumPower ??= defaultMaximumPower
   }
 }
 

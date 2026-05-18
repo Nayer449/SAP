@@ -1,6 +1,6 @@
 [project]
 name = "ocpp-server"
-version = "4.4.0"
+version = "4.7.3"
 description = "OCPP2 mock server"
 authors = [{ name = "Jérôme Benoit", email = "jerome.benoit@sap.com" }]
 readme = "README.md"
@@ -13,7 +13,7 @@ dependencies = [
 [tool.poetry.group.dev.dependencies]
 taskipy = "^1"
 ruff = "^0.15"
-mypy = "^1"
+mypy = "^2.0.0"
 pytest = "^9.0.0"
 pytest-asyncio = ">=1.3.0"
 pytest-cov = "^7.0.0"
@@ -36,7 +36,7 @@ select = ["E", "W", "F", "ASYNC", "S", "B", "A", "Q", "RUF", "I"]
 asyncio_mode = "auto"
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.14"
 warn_return_any = true
 warn_unused_configs = true
 warn_redundant_casts = true

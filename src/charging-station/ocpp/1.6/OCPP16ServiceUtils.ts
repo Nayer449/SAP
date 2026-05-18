@@ -18,7 +18,6 @@ import {
 } from '../../../charging-station/index.js'
 import { BaseError } from '../../../exception/index.js'
 import {
-  ChargePointErrorCode,
   type ConfigurationKey,
   type GenericResponse,
   type MeterValuesRequest,
@@ -131,7 +130,7 @@ export class OCPP16ServiceUtils {
   ): OCPP16StatusNotificationRequest {
     return {
       connectorId: commandParams.connectorId,
-      errorCode: ChargePointErrorCode.NO_ERROR,
+      errorCode: commandParams.errorCode,
       status: commandParams.status,
     } satisfies OCPP16StatusNotificationRequest
   }
@@ -890,7 +889,7 @@ export class OCPP16ServiceUtils {
         connectorId,
         meterValue: [transactionEndMeterValue],
         transactionId,
-      } as MeterValuesRequest)
+      })
     }
     return await chargingStation.ocppRequestService.requestHandler<
       Partial<StopTransactionRequest>,
@@ -1017,10 +1016,7 @@ export class OCPP16ServiceUtils {
               }
               return schedulePeriod
             }),
-          duration: differenceInSeconds(
-            chargingScheduleInterval.end,
-            compositeInterval.start as Date
-          ),
+          duration: differenceInSeconds(chargingScheduleInterval.end, compositeInterval.start),
           startSchedule: compositeInterval.start as Date,
         }
       }
@@ -1033,10 +1029,7 @@ export class OCPP16ServiceUtils {
               compositeInterval
             )
           ),
-          duration: differenceInSeconds(
-            compositeInterval.end as Date,
-            chargingScheduleInterval.start
-          ),
+          duration: differenceInSeconds(compositeInterval.end, chargingScheduleInterval.start),
         }
       }
       return chargingSchedule

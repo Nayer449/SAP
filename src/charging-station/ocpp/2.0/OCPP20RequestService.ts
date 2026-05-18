@@ -148,9 +148,8 @@ export class OCPP20RequestService extends OCPPRequestService {
     commandName: OCPP20RequestCommand,
     commandParams?: JsonType
   ): Request {
-    commandParams = commandParams as JsonObject
     logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.buildRequestPayload: Building ${commandName} payload`
+      `${chargingStation.logPrefix()} ${moduleName}.buildRequestPayload: Building '${commandName}' payload`
     )
     switch (commandName) {
       case OCPP20RequestCommand.AUTHORIZE:

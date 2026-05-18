@@ -14,7 +14,6 @@ import {
   type BroadcastChannelResponsePayload,
   type DataTransferResponse,
   DataTransferStatus,
-  type EmptyObject,
   GenericStatus,
   GetCertificateStatusEnumType,
   type HeartbeatResponse,
@@ -36,6 +35,7 @@ import {
   ResponseStatus,
   StandardParametersKey,
   type StartTransactionResponse,
+  type StatusNotificationRequest,
   type StopTransactionRequest,
   type StopTransactionResponse,
 } from '../../types/index.js'
@@ -48,7 +48,7 @@ import {
   logger,
 } from '../../utils/index.js'
 import { getConfigurationKey } from '../ConfigurationKeyUtils.js'
-import { buildMeterValue, OCPP20ServiceUtils } from '../ocpp/index.js'
+import { buildMeterValue, OCPP20ServiceUtils, sendAndSetConnectorStatus } from '../ocpp/index.js'
 import { WorkerBroadcastChannel } from './WorkerBroadcastChannel.js'
 
 const moduleName = 'ChargingStationWorkerBroadcastChannel'
@@ -62,7 +62,6 @@ type CommandResponse =
   | AuthorizeResponse
   | BootNotificationResponse
   | DataTransferResponse
-  | EmptyObject
   | HeartbeatResponse
   | OCPP20Get15118EVCertificateResponse
   | OCPP20GetCertificateStatusResponse
@@ -191,7 +190,13 @@ export class ChargingStationWorkerBroadcastChannel extends WorkerBroadcastChanne
               `${this.chargingStation.logPrefix()} ${moduleName}.requestHandler: 'url' field is required`
             )
           }
-          this.chargingStation.setSupervisionUrl(url)
+          const supervisionUser = requestPayload?.supervisionUser
+          const supervisionPassword = requestPayload?.supervisionPassword
+          this.chargingStation.setSupervisionUrl(
+            url,
+            typeof supervisionUser === 'string' ? supervisionUser : undefined,
+            typeof supervisionPassword === 'string' ? supervisionPassword : undefined
+          )
         },
       ],
       [
@@ -214,10 +219,7 @@ export class ChargingStationWorkerBroadcastChannel extends WorkerBroadcastChanne
         BroadcastChannelProcedureName.START_TRANSACTION,
         this.passthrough(RequestCommand.START_TRANSACTION),
       ],
-      [
-        BroadcastChannelProcedureName.STATUS_NOTIFICATION,
-        this.passthrough(RequestCommand.STATUS_NOTIFICATION),
-      ],
+      [BroadcastChannelProcedureName.STATUS_NOTIFICATION, this.handleStatusNotification.bind(this)],
       [
         BroadcastChannelProcedureName.STOP_AUTOMATIC_TRANSACTION_GENERATOR,
         (requestPayload?: BroadcastChannelRequestPayload) => {
@@ -440,6 +442,26 @@ export class ChargingStationWorkerBroadcastChannel extends WorkerBroadcastChanne
     )
   }
 
+  private async handleStatusNotification (
+    requestPayload?: BroadcastChannelRequestPayload
+  ): Promise<void> {
+    if (requestPayload?.connectorId == null) {
+      throw new BaseError(
+        `${this.chargingStation.logPrefix()} ${moduleName}.handleStatusNotification: 'connectorId' field is required`
+      )
+    }
+    const payload = requestPayload as Record<string, unknown>
+    if (payload.connectorStatus == null && payload.status == null) {
+      throw new BaseError(
+        `${this.chargingStation.logPrefix()} ${moduleName}.handleStatusNotification: 'connectorStatus' or 'status' field is required`
+      )
+    }
+    await sendAndSetConnectorStatus(
+      this.chargingStation,
+      requestPayload as unknown as StatusNotificationRequest
+    )
+  }
+
   private async handleStopTransaction (
     requestPayload?: BroadcastChannelRequestPayload
   ): Promise<StopTransactionResponse> {
@@ -523,6 +545,8 @@ export class ChargingStationWorkerBroadcastChannel extends WorkerBroadcastChanne
           `${this.chargingStation.logPrefix()} ${moduleName}.requestHandler: Handle request error:`,
           error
         )
+        delete requestPayload.supervisionPassword
+        delete requestPayload.supervisionUser
         responsePayload = {
           command,
           errorDetails: error instanceof OCPPError ? error.details : undefined,

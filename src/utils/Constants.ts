@@ -80,6 +80,7 @@ export class Constants {
     ocppVersion: OCPPVersion.VERSION_16,
     outOfOrderEndMeterValues: false,
     phaseLineToLineVoltageMeterValues: false,
+    postTransactionDelay: 0,
     reconnectExponentialDelay: false,
     registrationMaxRetries: -1,
     remoteAuthorization: true,
@@ -107,6 +108,8 @@ export class Constants {
   static readonly EMPTY_FUNCTION: () => void = Object.freeze(() => {
     /* This is intentional */
   })
+
+  static readonly ENV_SIMULATOR_COLD_START = 'SIMULATOR_COLD_START'
 
   static readonly MAX_RANDOM_INTEGER = 281474976710655 // 2^48 - 1 (randomInit() limit)
 

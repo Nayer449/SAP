@@ -2,13 +2,9 @@
  * @file Shared test utilities for Vue.js web UI unit tests
  * @description MockWebSocket, withSetup composable helper, mock factories.
  */
-import { flushPromises } from '@vue/test-utils'
+import { ResponseStatus } from 'ui-common'
 import { vi } from 'vitest'
 import { type App, createApp } from 'vue'
-
-import { ResponseStatus } from '@/types'
-
-export { flushPromises as flushAllPromises }
 
 // ── MockUIClient ──────────────────────────────────────────────────────────────
 
@@ -17,6 +13,7 @@ export interface MockUIClient {
   authorize: ReturnType<typeof vi.fn>
   closeConnection: ReturnType<typeof vi.fn>
   deleteChargingStation: ReturnType<typeof vi.fn>
+  isConnected: ReturnType<typeof vi.fn>
   listChargingStations: ReturnType<typeof vi.fn>
   listTemplates: ReturnType<typeof vi.fn>
   lockConnector: ReturnType<typeof vi.fn>
@@ -24,6 +21,7 @@ export interface MockUIClient {
   openConnection: ReturnType<typeof vi.fn>
   registerWSEventListener: ReturnType<typeof vi.fn>
   setConfiguration: ReturnType<typeof vi.fn>
+  setConnectorStatus: ReturnType<typeof vi.fn>
   setSupervisionUrl: ReturnType<typeof vi.fn>
   simulatorState: ReturnType<typeof vi.fn>
   startAutomaticTransactionGenerator: ReturnType<typeof vi.fn>
@@ -77,6 +75,7 @@ export class MockWebSocket {
   static readonly CLOSED = 3
   static readonly CLOSING = 2
   static readonly CONNECTING = 0
+  static lastInstance: MockWebSocket | null = null
   static readonly OPEN = 1
 
   addEventListener: ReturnType<typeof vi.fn>
@@ -98,6 +97,7 @@ export class MockWebSocket {
     public readonly url = '',
     public readonly protocols: string | string[] = []
   ) {
+    MockWebSocket.lastInstance = this
     this.addEventListener = vi.fn()
     this.close = vi.fn()
     this.removeEventListener = vi.fn()
@@ -142,6 +142,7 @@ export function createMockUIClient (): MockUIClient {
     authorize: vi.fn().mockResolvedValue(successResponse),
     closeConnection: vi.fn().mockResolvedValue(successResponse),
     deleteChargingStation: vi.fn().mockResolvedValue(successResponse),
+    isConnected: vi.fn().mockReturnValue(false),
     listChargingStations: vi.fn().mockResolvedValue({ ...successResponse, chargingStations: [] }),
     listTemplates: vi.fn().mockResolvedValue({ ...successResponse, templates: [] }),
     lockConnector: vi.fn().mockResolvedValue(successResponse),
@@ -150,6 +151,7 @@ export function createMockUIClient (): MockUIClient {
     openConnection: vi.fn().mockResolvedValue(successResponse),
     registerWSEventListener: vi.fn(),
     setConfiguration: vi.fn(),
+    setConnectorStatus: vi.fn().mockResolvedValue(successResponse),
     setSupervisionUrl: vi.fn().mockResolvedValue(successResponse),
     simulatorState: vi
       .fn()

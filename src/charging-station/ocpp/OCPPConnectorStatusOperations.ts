@@ -5,6 +5,7 @@ import {
   type ConnectorStatus,
   ConnectorStatusEnum,
   ErrorType,
+  type OCPP16ChargePointErrorCode,
   OCPPVersion,
   RequestCommand,
   type StatusNotificationRequest,
@@ -30,6 +31,7 @@ export const sendAndSetConnectorStatus = async (
   const params = commandParams as Record<string, unknown>
   const connectorId = params.connectorId as number
   const status = (params.connectorStatus ?? params.status) as ConnectorStatusEnum
+  const errorCode = params.errorCode as OCPP16ChargePointErrorCode | undefined
   const connectorStatus = chargingStation.getConnectorStatus(connectorId)
   if (connectorStatus == null) {
     return
@@ -42,10 +44,33 @@ export const sendAndSetConnectorStatus = async (
     >(chargingStation, RequestCommand.STATUS_NOTIFICATION, commandParams)
   }
   connectorStatus.status = status
+  connectorStatus.errorCode = errorCode
   chargingStation.emitChargingStationEvent(ChargingStationEvents.connectorStatusChanged, {
     connectorId,
     ...connectorStatus,
   })
+}
+
+/**
+ * Sends Available or Unavailable connector status after a transaction ends.
+ * Re-evaluates station and connector availability to determine the target status.
+ * @param chargingStation - Target charging station
+ * @param connectorId - Connector ID to transition
+ */
+export const sendPostTransactionStatus = async (
+  chargingStation: ChargingStation,
+  connectorId: number
+): Promise<void> => {
+  const status =
+    chargingStation.isChargingStationAvailable() &&
+    chargingStation.isConnectorAvailable(connectorId)
+      ? ConnectorStatusEnum.Available
+      : ConnectorStatusEnum.Unavailable
+  await sendAndSetConnectorStatus(chargingStation, {
+    connectorId,
+    connectorStatus: status,
+    status,
+  } as unknown as StatusNotificationRequest)
 }
 
 /**

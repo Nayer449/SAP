@@ -1,4 +1,5 @@
 {
+  "$schemaVersion": 1,
   "supervisionUrls": ["ws://localhost:9000"],
   "supervisionUrlOcppConfiguration": true,
   "supervisionUrlOcppKey": "CentralSystemAddress",
@@ -77,6 +78,11 @@
         "value": "Energy.Active.Import.Register,Power.Active.Import,Current.Import,Voltage"
       },
       {
+        "key": "SampledDataCtrlr.TxEndedMeasurands",
+        "readonly": false,
+        "value": "Energy.Active.Import.Register"
+      },
+      {
         "key": "TxCtrlr.EVConnectionTimeOut",
         "readonly": false,
         "value": "180"
@@ -90,6 +96,11 @@
         "key": "SampledDataCtrlr.SignStartedReadings",
         "readonly": false,
         "value": "true"
+      },
+      {
+        "key": "SampledDataCtrlr.TxStartedMeasurands",
+        "readonly": false,
+        "value": "Energy.Active.Import.Register"
       },
       {
         "key": "SampledDataCtrlr.SignUpdatedReadings",

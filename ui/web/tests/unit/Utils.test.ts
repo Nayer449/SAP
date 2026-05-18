@@ -1,152 +1,26 @@
 /**
  * @file Tests for Utils composable
- * @description Unit tests for type conversion, localStorage, UUID, and toggle state utilities.
+ * @description Unit tests for localStorage, toggle state, and useFetchData utilities.
  */
 import { flushPromises } from '@vue/test-utils'
+import { ResponseStatus } from 'ui-common'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
-  convertToBoolean,
-  convertToInt,
   deleteFromLocalStorage,
   getFromLocalStorage,
   getLocalStorage,
-  randomUUID,
   resetToggleButtonState,
   setToLocalStorage,
-  useExecuteAction,
-  validateUUID,
-} from '@/composables'
+  useChargingStations,
+  useConfiguration,
+  useTemplates,
+} from '@/core/index.js'
+import { useFetchData } from '@/shared/composables/useFetchData.js'
 
-import { toastMock } from '../setup'
+import { toastMock } from '../setup.js'
 
 describe('Utils', () => {
-  describe('convertToBoolean', () => {
-    it('should return true for boolean true', () => {
-      expect(convertToBoolean(true)).toBe(true)
-    })
-
-    it('should return false for boolean false', () => {
-      expect(convertToBoolean(false)).toBe(false)
-    })
-
-    it('should return true for string "true"', () => {
-      expect(convertToBoolean('true')).toBe(true)
-    })
-
-    it('should return true for string "True" (case-insensitive)', () => {
-      expect(convertToBoolean('True')).toBe(true)
-    })
-
-    it('should return true for string "TRUE" (case-insensitive)', () => {
-      expect(convertToBoolean('TRUE')).toBe(true)
-    })
-
-    it('should return false for string "FALSE" (case-insensitive)', () => {
-      expect(convertToBoolean('FALSE')).toBe(false)
-    })
-
-    it('should return true for string "1"', () => {
-      expect(convertToBoolean('1')).toBe(true)
-    })
-
-    it('should return true for numeric 1', () => {
-      expect(convertToBoolean(1)).toBe(true)
-    })
-
-    it('should return false for string "false"', () => {
-      expect(convertToBoolean('false')).toBe(false)
-    })
-
-    it('should return false for string "0"', () => {
-      expect(convertToBoolean('0')).toBe(false)
-    })
-
-    it('should return false for numeric 0', () => {
-      expect(convertToBoolean(0)).toBe(false)
-    })
-
-    it('should return false for null', () => {
-      expect(convertToBoolean(null)).toBe(false)
-    })
-
-    it('should return false for undefined', () => {
-      expect(convertToBoolean(undefined)).toBe(false)
-    })
-
-    it('should return false for empty string', () => {
-      expect(convertToBoolean('')).toBe(false)
-    })
-
-    it('should return false for arbitrary string', () => {
-      expect(convertToBoolean('random')).toBe(false)
-    })
-
-    it('should return false for numeric 2', () => {
-      expect(convertToBoolean(2)).toBe(false)
-    })
-
-    it('should return true for whitespace-padded "true"', () => {
-      expect(convertToBoolean(' true ')).toBe(true)
-    })
-
-    it('should return true for whitespace-padded "1"', () => {
-      expect(convertToBoolean(' 1 ')).toBe(true)
-    })
-
-    it('should return false for whitespace-padded "false"', () => {
-      expect(convertToBoolean(' false ')).toBe(false)
-    })
-
-    it('should return true for whitespace-padded "TRUE"', () => {
-      expect(convertToBoolean(' TRUE ')).toBe(true)
-    })
-  })
-
-  describe('convertToInt', () => {
-    it('should return integer for integer input', () => {
-      expect(convertToInt(42)).toBe(42)
-    })
-
-    it('should truncate float to integer', () => {
-      expect(convertToInt(42.7)).toBe(42)
-    })
-
-    it('should truncate negative float to integer', () => {
-      expect(convertToInt(-42.7)).toBe(-42)
-    })
-
-    it('should parse string integer', () => {
-      expect(convertToInt('42')).toBe(42)
-    })
-
-    it('should parse negative string integer', () => {
-      expect(convertToInt('-42')).toBe(-42)
-    })
-
-    it('should return 0 for null', () => {
-      expect(convertToInt(null)).toBe(0)
-    })
-
-    it('should return 0 for undefined', () => {
-      expect(convertToInt(undefined)).toBe(0)
-    })
-
-    it('should throw error for non-numeric string', () => {
-      expect(() => convertToInt('abc')).toThrow(Error)
-      expect(() => convertToInt('abc')).toThrow("Cannot convert to integer: 'abc'")
-    })
-
-    it('should throw error for empty string', () => {
-      expect(() => convertToInt('')).toThrow(Error)
-    })
-
-    it('should return NaN for NaN input', () => {
-      const result = convertToInt(Number.NaN)
-      expect(Number.isNaN(result)).toBe(true)
-    })
-  })
-
   describe('localStorage utilities', () => {
     afterEach(() => {
       localStorage.clear()
@@ -205,57 +79,6 @@ describe('Utils', () => {
     })
   })
 
-  describe('UUID', () => {
-    it('should generate valid UUID v4', () => {
-      const uuid = randomUUID()
-
-      expect(validateUUID(uuid)).toBe(true)
-    })
-
-    it('should generate different UUIDs on each call', () => {
-      const uuid1 = randomUUID()
-      const uuid2 = randomUUID()
-
-      expect(uuid1).not.toBe(uuid2)
-    })
-
-    it('should validate correct UUID v4 format', () => {
-      const validUUID = '550e8400-e29b-41d4-a716-446655440000'
-
-      const result = validateUUID(validUUID)
-
-      expect(result).toBe(true)
-    })
-
-    it('should reject non-string UUID', () => {
-      const result = validateUUID(123)
-
-      expect(result).toBe(false)
-    })
-
-    it('should reject invalid UUID format', () => {
-      const result = validateUUID('not-a-uuid')
-
-      expect(result).toBe(false)
-    })
-
-    it('should reject UUID with wrong version (v3 instead of v4)', () => {
-      const v3UUID = '550e8400-e29b-31d4-a716-446655440000'
-
-      const result = validateUUID(v3UUID)
-
-      expect(result).toBe(false)
-    })
-
-    it('should reject UUID with invalid variant', () => {
-      const invalidVariantUUID = '550e8400-e29b-41d4-c716-446655440000'
-
-      const result = validateUUID(invalidVariantUUID)
-
-      expect(result).toBe(false)
-    })
-  })
-
   describe('resetToggleButtonState', () => {
     afterEach(() => {
       localStorage.clear()
@@ -303,33 +126,126 @@ describe('Utils', () => {
     })
   })
 
-  describe('useExecuteAction', () => {
+  describe('useFetchData', () => {
     afterEach(() => {
       vi.restoreAllMocks()
     })
 
-    it('should call emit and toast.success on action success', async () => {
-      const emit = vi.fn()
-      const executeAction = useExecuteAction(emit)
+    it('should call onSuccess and reset fetching on successful fetch', async () => {
+      const response = { status: ResponseStatus.SUCCESS }
+      const onSuccess = vi.fn()
+      const { fetch, fetching } = useFetchData(
+        () => Promise.resolve(response),
+        onSuccess,
+        'Error message'
+      )
 
-      executeAction(Promise.resolve(), 'Success message', 'Error message')
+      fetch()
+      expect(fetching.value).toBe(true)
       await flushPromises()
 
-      expect(emit).toHaveBeenCalledWith('need-refresh')
-      expect(toastMock.success).toHaveBeenCalledWith('Success message')
+      expect(onSuccess).toHaveBeenCalledWith(response)
+      expect(fetching.value).toBe(false)
     })
 
-    it('should call toast.error and console.error on action failure', async () => {
+    it('should call onError and toast.error on failed fetch', async () => {
       const consoleSpy = vi.spyOn(console, 'error')
-      const emit = vi.fn()
-      const executeAction = useExecuteAction(emit)
+      const onError = vi.fn()
+      const { fetch } = useFetchData(
+        () => Promise.reject(new Error('network')),
+        vi.fn(),
+        'Fetch failed',
+        onError
+      )
 
-      executeAction(Promise.reject(new Error('fail')), 'Success', 'Error at action')
+      fetch()
       await flushPromises()
 
-      expect(emit).not.toHaveBeenCalled()
-      expect(toastMock.error).toHaveBeenCalledWith('Error at action')
-      expect(consoleSpy).toHaveBeenCalledWith('Error at action:', expect.any(Error))
+      expect(onError).toHaveBeenCalled()
+      expect(toastMock.error).toHaveBeenCalledWith('Fetch failed')
+      expect(consoleSpy).toHaveBeenCalledWith('Fetch failed:', expect.any(Error))
+    })
+
+    it('should prevent concurrent fetches via loading guard', async () => {
+      let resolvePromise: ((value: unknown) => void) | undefined
+      const clientFn = vi.fn().mockImplementation(
+        () =>
+          new Promise(resolve => {
+            resolvePromise = resolve
+          })
+      )
+      const { fetch } = useFetchData(clientFn, vi.fn(), 'Error')
+
+      fetch()
+      fetch()
+      fetch()
+
+      expect(clientFn).toHaveBeenCalledTimes(1)
+
+      if (resolvePromise !== undefined) {
+        resolvePromise({ status: ResponseStatus.SUCCESS })
+      }
+      await flushPromises()
+    })
+
+    it('should reset fetching on error', async () => {
+      const { fetch, fetching } = useFetchData(
+        () => Promise.reject(new Error('fail')),
+        vi.fn(),
+        'Error'
+      )
+
+      fetch()
+      await flushPromises()
+
+      expect(fetching.value).toBe(false)
+    })
+
+    it('should work without onError callback', async () => {
+      const consoleSpy = vi.spyOn(console, 'error')
+      const { fetch } = useFetchData(
+        () => Promise.reject(new Error('fail')),
+        vi.fn(),
+        'Fetch error'
+      )
+
+      fetch()
+      await flushPromises()
+
+      expect(toastMock.error).toHaveBeenCalledWith('Fetch error')
+      expect(consoleSpy).toHaveBeenCalled()
+    })
+
+    it('should log error when onError callback throws', async () => {
+      const consoleSpy = vi.spyOn(console, 'error')
+      const throwingOnError = vi.fn().mockImplementation(() => {
+        throw new Error('callback error')
+      })
+      const { fetch } = useFetchData(
+        () => Promise.reject(new Error('fail')),
+        vi.fn(),
+        'Fetch error',
+        throwingOnError
+      )
+
+      fetch()
+      await flushPromises()
+
+      expect(consoleSpy).toHaveBeenCalledWith('Error in onError callback:', expect.any(Error))
+    })
+  })
+
+  describe('inject utilities outside provide scope', () => {
+    it('useConfiguration should throw when not provided', () => {
+      expect(() => useConfiguration()).toThrow('configuration not provided')
+    })
+
+    it('useChargingStations should throw when not provided', () => {
+      expect(() => useChargingStations()).toThrow('chargingStations not provided')
+    })
+
+    it('useTemplates should throw when not provided', () => {
+      expect(() => useTemplates()).toThrow('templates not provided')
     })
   })
 })

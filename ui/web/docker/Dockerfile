@@ -6,21 +6,23 @@ COPY . ./
 RUN set -ex \
   && npm install -g --ignore-scripts corepack \
   && corepack enable \
-  && corepack prepare pnpm@latest --activate \
-  && pnpm set progress=false \
-  && pnpm config set depth 0 \
-  && pnpm install --ignore-scripts \
-  && cp docker/config.json public/config.json \
-  && pnpm build
+  && pnpm install --ignore-scripts --frozen-lockfile \
+  && cp ui/web/docker/config.json ui/web/public/config.json \
+  && pnpm --filter web build
 
 FROM node:lts-alpine
 
 WORKDIR /usr/app
-COPY --from=builder /usr/builder ./
-COPY docker/run.sh /run.sh
-COPY docker/autoconfig.sh /autoconfig.sh
+COPY --from=builder /usr/builder/node_modules /node_modules
+COPY --from=builder /usr/builder/ui/web/package.json ./
+COPY --from=builder /usr/builder/ui/web/node_modules ./node_modules
+COPY --from=builder /usr/builder/ui/web/dist ./dist
+COPY --from=builder /usr/builder/ui/web/start.js ./
+COPY ui/web/docker/run.sh /run.sh
+COPY ui/web/docker/autoconfig.sh /autoconfig.sh
 RUN set -ex \
   && chmod +x /run.sh \
   && chmod +x /autoconfig.sh
 
+EXPOSE 3030
 ENTRYPOINT ["/bin/sh", "-c", "/autoconfig.sh && /run.sh"]
