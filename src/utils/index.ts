@@ -8,6 +8,31 @@ export {
   buildEvsesStatus,
 } from './ChargingStationConfigurationUtils.js'
 export { Configuration } from './Configuration.js'
+export {
+  applyConfigurationMigration,
+  coerceConfigurationVersion,
+  CURRENT_CONFIGURATION_SCHEMA_VERSION,
+  DEPRECATED_KEY_REMAPPINGS,
+  type FieldError,
+  remapDeprecatedKeys,
+} from './ConfigurationMigrations.js'
+export {
+  ConfigurationSchema,
+  LogConfigurationSchema,
+  StationTemplateUrlSchema,
+  StorageConfigurationSchema,
+  UI_SERVER_ACCESS_POLICY_DEFAULTS,
+  UIServerAccessPolicySchema,
+  UIServerAuthenticationSchema,
+  UIServerConfigurationSchema,
+  WorkerConfigurationSchema,
+} from './ConfigurationSchema.js'
+export {
+  buildPerformanceUriFilePath,
+  configurationLogPrefix,
+  getDefaultPerformanceStorageUri,
+} from './ConfigurationUtils.js'
+export { ConfigurationValidationError, validateConfiguration } from './ConfigurationValidation.js'
 export { Constants } from './Constants.js'
 export { ACElectricUtils, DCElectricUtils } from './ElectricUtils.js'
 export {
@@ -19,7 +44,12 @@ export {
   handleUncaughtException,
   handleUnhandledRejection,
 } from './ErrorUtils.js'
-export { watchJsonFile } from './FileUtils.js'
+export {
+  atomicWriteFile,
+  atomicWriteFileSync,
+  type AtomicWriteOptions,
+  watchJsonFile,
+} from './FileUtils.js'
 export { logger } from './Logger.js'
 export {
   buildAddedMessage,
@@ -46,12 +76,15 @@ export {
   formatLogPrefix,
   generateUUID,
   getMessageTypeString,
+  getRandomFloat,
   getRandomFloatFluctuatedRounded,
   getRandomFloatRounded,
   getWebSocketCloseEventStatusString,
   has,
+  insertAt,
   isArraySorted,
   isAsyncFunction,
+  isCFEnvironment,
   isEmpty,
   isJsonObject,
   isNotEmptyArray,
@@ -62,6 +95,7 @@ export {
   mergeDeepRight,
   once,
   promiseWithTimeout,
+  queueMicrotaskErrorThrowing,
   roundTo,
   secureRandom,
   sleep,

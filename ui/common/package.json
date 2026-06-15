@@ -1,16 +1,16 @@
 {
   "$schema": "https://json.schemastore.org/package",
   "name": "ui-common",
-  "version": "4.7.3",
+  "version": "4.8.0",
   "engines": {
     "node": ">=22.0.0",
     "pnpm": ">=10.9.0"
   },
   "volta": {
-    "node": "24.15.0",
-    "pnpm": "11.1.2"
+    "node": "24.16.0",
+    "pnpm": "11.6.0"
   },
-  "packageManager": "pnpm@11.1.2",
+  "packageManager": "pnpm@11.6.0",
   "type": "module",
   "exports": "./src/index.ts",
   "scripts": {

@@ -28,6 +28,7 @@ import {
   StorageType,
   SupervisionUrlDistribution,
 } from '../../src/types/index.js'
+import { CURRENT_CONFIGURATION_SCHEMA_VERSION } from '../../src/utils/index.js'
 import { Configuration } from '../../src/utils/index.js'
 import { WorkerProcessType } from '../../src/worker/index.js'
 import { standardCleanup } from '../helpers/TestLifecycleHelpers.js'
@@ -119,6 +120,14 @@ await describe('Configuration', async () => {
     assert.notStrictEqual(uiServer.options, undefined)
     assert.strictEqual(typeof uiServer.options?.host, 'string')
     assert.strictEqual(typeof uiServer.options?.port, 'number')
+    const accessPolicy = uiServer.accessPolicy
+    assert.notStrictEqual(accessPolicy, undefined)
+    if (accessPolicy == null) {
+      assert.fail('Expected UI server access policy defaults')
+    }
+    assert.strictEqual(accessPolicy.requireTlsForNonLoopback, true)
+    assert.strictEqual(accessPolicy.allowLoopbackProxy, false)
+    assert.deepStrictEqual(accessPolicy.trustedProxies, [])
   })
 
   await it('should return performance storage configuration', () => {
@@ -149,6 +158,7 @@ await describe('Configuration', async () => {
     const internals = getConfigurationInternals()
     const originalData = internals.configurationData
     internals.configurationData = {
+      $schemaVersion: CURRENT_CONFIGURATION_SCHEMA_VERSION,
       stationTemplateUrls: [],
     }
 
