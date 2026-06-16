@@ -34,9 +34,7 @@
     "type": "ws",
     "authentication": {
 	"enabled": true,
-    	"type": "protocol-basic-auth",
-    	"user": "admin",
-    	"password": "password123"
+    	"type": "protocol-basic-auth"
     }
   },
   "stationTemplateUrls": [
