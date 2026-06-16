@@ -29,13 +29,12 @@
       "allowedHosts": [
         "sap-et0z.onrender.com",
         "ocpp-test-platform-web-58kt.vercel.app"
-      ],
-      "allowAnyOrigin": true
+      ]
     },
     "type": "ws",
     "authentication": {
-	"enabled": true,
-    	"type": "protocol-basic-auth"
+      "enabled": true,
+      "type": "protocol-basic-auth"
     }
   },
   "stationTemplateUrls": [
