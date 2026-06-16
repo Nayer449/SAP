@@ -33,8 +33,10 @@
     },
     "type": "ws",
     "authentication": {
-      "enabled": false,
-      "type": "protocol-basic-auth"
+	"enabled": true,
+    	"type": "protocol-basic-auth",
+    	"user": "admin",
+    	"password": "password123"
     }
   },
   "stationTemplateUrls": [
