@@ -26,12 +26,14 @@
       "port": 10000,
       "trustProxy": true
     },
+   "trustedProxies": ["loopback", "uniquelocal"],
     "accessPolicy": {
       "allowedHosts": [
         "sap-et0z.onrender.com",
         "ocpp-test-platform-web-58kt.vercel.app"
       ]
     },
+   "trustedProxies": ["loopback", "uniquelocal"],
     "authentication": {
       "enabled": false,
       "type": "protocol-basic-auth"
