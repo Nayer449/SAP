@@ -42,7 +42,7 @@
     },
     {
       "file": "virtual-simple.station-template.json",
-      "numberOfStations": 0
+      "numberOfStations": 1
     }
   ]
 }
