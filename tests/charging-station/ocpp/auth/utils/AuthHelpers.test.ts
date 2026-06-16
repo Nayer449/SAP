@@ -10,11 +10,11 @@ import {
   AuthenticationMethod,
   type AuthorizationResult,
   AuthorizationStatus,
+  type Identifier,
   IdentifierType,
-  type UnifiedIdentifier,
 } from '../../../../../src/charging-station/ocpp/auth/types/AuthTypes.js'
 import { AuthHelpers } from '../../../../../src/charging-station/ocpp/auth/utils/AuthHelpers.js'
-import { OCPPVersion } from '../../../../../src/types/ocpp/OCPPVersion.js'
+import { OCPP20MessageFormatEnumType } from '../../../../../src/types/index.js'
 import { standardCleanup } from '../../../../helpers/TestLifecycleHelpers.js'
 
 await describe('AuthHelpers', async () => {
@@ -38,8 +38,8 @@ await describe('AuthHelpers', async () => {
       const result = AuthHelpers.calculateTTL(futureDate)
       assert.notStrictEqual(result, undefined)
       if (result !== undefined) {
-        assert.ok(result >= 4)
-        assert.ok(result <= 5)
+        assert.ok(result >= 4, 'TTL should be at least 4 seconds')
+        assert.ok(result <= 5, 'TTL should be at most 5 seconds')
       }
     })
 
@@ -52,8 +52,7 @@ await describe('AuthHelpers', async () => {
 
   await describe('createAuthRequest', async () => {
     await it('should create basic auth request with minimal parameters', () => {
-      const identifier: UnifiedIdentifier = {
-        ocppVersion: OCPPVersion.VERSION_16,
+      const identifier: Identifier = {
         type: IdentifierType.ID_TAG,
         value: 'TEST123',
       }
@@ -70,8 +69,7 @@ await describe('AuthHelpers', async () => {
     })
 
     await it('should create auth request with connector ID', () => {
-      const identifier: UnifiedIdentifier = {
-        ocppVersion: OCPPVersion.VERSION_20,
+      const identifier: Identifier = {
         type: IdentifierType.LOCAL,
         value: 'LOCAL001',
       }
@@ -84,8 +82,7 @@ await describe('AuthHelpers', async () => {
     })
 
     await it('should create auth request with metadata', () => {
-      const identifier: UnifiedIdentifier = {
-        ocppVersion: OCPPVersion.VERSION_20,
+      const identifier: Identifier = {
         type: IdentifierType.CENTRAL,
         value: 'CENTRAL001',
       }
@@ -128,8 +125,7 @@ await describe('AuthHelpers', async () => {
   await describe('formatAuthError', async () => {
     await it('should format error message with truncated identifier', () => {
       const error = new Error('Connection timeout')
-      const identifier: UnifiedIdentifier = {
-        ocppVersion: OCPPVersion.VERSION_16,
+      const identifier: Identifier = {
         type: IdentifierType.ID_TAG,
         value: 'VERY_LONG_IDENTIFIER_VALUE_12345',
       }
@@ -143,15 +139,15 @@ await describe('AuthHelpers', async () => {
 
     await it('should handle short identifiers correctly', () => {
       const error = new Error('Invalid format')
-      const identifier: UnifiedIdentifier = {
-        ocppVersion: OCPPVersion.VERSION_20,
+      const identifier: Identifier = {
         type: IdentifierType.LOCAL,
         value: 'SHORT',
       }
 
       const message = AuthHelpers.formatAuthError(error, identifier)
 
-      assert.ok(message.includes('SHORT...'))
+      assert.ok(message.includes('SHORT'))
+      assert.ok(!message.includes('SHORT...'))
       assert.ok(message.includes('Local'))
       assert.ok(message.includes('Invalid format'))
     })
@@ -449,7 +445,7 @@ await describe('AuthHelpers', async () => {
         method: AuthenticationMethod.LOCAL_LIST,
         personalMessage: {
           content: 'Welcome',
-          format: 'ASCII',
+          format: OCPP20MessageFormatEnumType.ASCII,
         },
         status: AuthorizationStatus.ACCEPTED,
         timestamp: new Date('2024-01-01T00:00:00Z'),

@@ -1,15 +1,26 @@
 import type { ValidateFunction } from 'ajv'
 
-import { addConfigurationKey, type ChargingStation } from '../../../charging-station/index.js'
-import { OCPPError } from '../../../exception/index.js'
+import {
+  addConfigurationKey,
+  buildConfigKey,
+  type ChargingStation,
+} from '../../../charging-station/index.js'
 import {
   ChargingStationEvents,
-  ErrorType,
+  ConnectorStatusEnum,
+  GenericStatus,
   type JsonType,
+  OCPP20AuthorizationStatusEnumType,
+  type OCPP20AuthorizeRequest,
+  type OCPP20AuthorizeResponse,
   type OCPP20BootNotificationResponse,
+  OCPP20ComponentName,
+  type OCPP20DataTransferResponse,
   type OCPP20FirmwareStatusNotificationResponse,
+  type OCPP20Get15118EVCertificateResponse,
+  type OCPP20GetCertificateStatusResponse,
   type OCPP20HeartbeatResponse,
-  OCPP20IncomingRequestCommand,
+  type OCPP20IncomingRequestCommand,
   type OCPP20LogStatusNotificationResponse,
   type OCPP20MeterValuesResponse,
   type OCPP20NotifyCustomerInformationResponse,
@@ -17,18 +28,24 @@ import {
   OCPP20OptionalVariableName,
   OCPP20RequestCommand,
   type OCPP20SecurityEventNotificationResponse,
+  type OCPP20SignCertificateRequest,
+  type OCPP20SignCertificateResponse,
+  type OCPP20StatusNotificationRequest,
   type OCPP20StatusNotificationResponse,
+  OCPP20TransactionEventEnumType,
   type OCPP20TransactionEventRequest,
   type OCPP20TransactionEventResponse,
   OCPPVersion,
   RegistrationStatusEnumType,
+  type RequestCommand,
   type ResponseHandler,
 } from '../../../types/index.js'
-import { OCPP20AuthorizationStatusEnumType } from '../../../types/ocpp/2.0/Transaction.js'
-import { isAsyncFunction, logger } from '../../../utils/index.js'
+import { convertToDate, logger } from '../../../utils/index.js'
+import { sendAndSetConnectorStatus } from '../OCPPConnectorStatusOperations.js'
 import { OCPPResponseService } from '../OCPPResponseService.js'
+import { createPayloadValidatorMap, isRequestCommandSupported } from '../OCPPServiceUtils.js'
+import { OCPP20IncomingRequestService } from './OCPP20IncomingRequestService.js'
 import { OCPP20ServiceUtils } from './OCPP20ServiceUtils.js'
-
 const moduleName = 'OCPP20ResponseService'
 
 /**
@@ -63,7 +80,7 @@ const moduleName = 'OCPP20ResponseService'
  * components to provide comprehensive protocol support with enhanced features.
  *
  * Response Validation Workflow:
- * 1. Response received from CSMS for previously sent request
+ * 1. Response received from CSMS for the corresponding request
  * 2. Response payload validated against OCPP 2.0+ JSON schema
  * 3. Response routed to appropriate handler based on original request type
  * 4. Charging station state and variable model updated based on response content
@@ -79,134 +96,117 @@ export class OCPP20ResponseService extends OCPPResponseService {
     ValidateFunction<JsonType>
   >
 
+  protected readonly bootNotificationRequestCommand = OCPP20RequestCommand.BOOT_NOTIFICATION
+  protected readonly csmsName = 'CSMS'
+  protected readonly moduleName = moduleName
+
   protected payloadValidatorFunctions: Map<OCPP20RequestCommand, ValidateFunction<JsonType>>
-  private readonly responseHandlers: Map<OCPP20RequestCommand, ResponseHandler>
+
+  protected readonly responseHandlers: Map<RequestCommand, ResponseHandler>
 
   public constructor () {
     super(OCPPVersion.VERSION_201)
-    this.responseHandlers = new Map<OCPP20RequestCommand, ResponseHandler>([
+    this.responseHandlers = new Map<RequestCommand, ResponseHandler>([
+      [
+        OCPP20RequestCommand.AUTHORIZE,
+        this.toResponseHandler(this.handleResponseAuthorize.bind(this)),
+      ],
       [
         OCPP20RequestCommand.BOOT_NOTIFICATION,
-        this.handleResponseBootNotification.bind(this) as ResponseHandler,
+        this.toResponseHandler(this.handleResponseBootNotification.bind(this)),
+      ],
+      [
+        OCPP20RequestCommand.DATA_TRANSFER,
+        this.toResponseHandler(this.handleResponseDataTransfer.bind(this)),
       ],
       [
         OCPP20RequestCommand.FIRMWARE_STATUS_NOTIFICATION,
-        this.handleResponseFirmwareStatusNotification.bind(this) as ResponseHandler,
+        this.toResponseHandler(this.handleResponseFirmwareStatusNotification.bind(this)),
       ],
-      [OCPP20RequestCommand.HEARTBEAT, this.handleResponseHeartbeat.bind(this) as ResponseHandler],
+      [
+        OCPP20RequestCommand.GET_15118_EV_CERTIFICATE,
+        this.toResponseHandler(this.handleResponseGet15118EVCertificate.bind(this)),
+      ],
+      [
+        OCPP20RequestCommand.GET_CERTIFICATE_STATUS,
+        this.toResponseHandler(this.handleResponseGetCertificateStatus.bind(this)),
+      ],
+      [
+        OCPP20RequestCommand.HEARTBEAT,
+        this.toResponseHandler(this.handleResponseHeartbeat.bind(this)),
+      ],
       [
         OCPP20RequestCommand.LOG_STATUS_NOTIFICATION,
-        this.handleResponseLogStatusNotification.bind(this) as ResponseHandler,
+        this.toResponseHandler(this.handleResponseLogStatusNotification.bind(this)),
       ],
       [
         OCPP20RequestCommand.METER_VALUES,
-        this.handleResponseMeterValues.bind(this) as ResponseHandler,
+        this.toResponseHandler(this.handleResponseMeterValues.bind(this)),
       ],
       [
         OCPP20RequestCommand.NOTIFY_CUSTOMER_INFORMATION,
-        this.handleResponseNotifyCustomerInformation.bind(this) as ResponseHandler,
+        this.toResponseHandler(this.handleResponseNotifyCustomerInformation.bind(this)),
       ],
       [
         OCPP20RequestCommand.NOTIFY_REPORT,
-        this.handleResponseNotifyReport.bind(this) as ResponseHandler,
+        this.toResponseHandler(this.handleResponseNotifyReport.bind(this)),
       ],
       [
         OCPP20RequestCommand.SECURITY_EVENT_NOTIFICATION,
-        this.handleResponseSecurityEventNotification.bind(this) as ResponseHandler,
+        this.toResponseHandler(this.handleResponseSecurityEventNotification.bind(this)),
+      ],
+      [
+        OCPP20RequestCommand.SIGN_CERTIFICATE,
+        this.toResponseHandler(this.handleResponseSignCertificate.bind(this)),
       ],
       [
         OCPP20RequestCommand.STATUS_NOTIFICATION,
-        this.handleResponseStatusNotification.bind(this) as ResponseHandler,
+        this.toResponseHandler(this.handleResponseStatusNotification.bind(this)),
       ],
       [
         OCPP20RequestCommand.TRANSACTION_EVENT,
-        this.handleResponseTransactionEvent.bind(this) as ResponseHandler,
+        this.toResponseHandler(this.handleResponseTransactionEvent.bind(this)),
       ],
     ])
-    this.payloadValidatorFunctions = OCPP20ServiceUtils.createPayloadValidatorMap(
+    this.payloadValidatorFunctions = createPayloadValidatorMap(
       OCPP20ServiceUtils.createResponsePayloadConfigs(),
       OCPP20ServiceUtils.createPayloadOptions(moduleName, 'constructor'),
       this.ajv
     )
-    this.incomingRequestResponsePayloadValidateFunctions =
-      OCPP20ServiceUtils.createPayloadValidatorMap(
-        OCPP20ServiceUtils.createIncomingRequestResponsePayloadConfigs(),
-        OCPP20ServiceUtils.createPayloadOptions(moduleName, 'constructor'),
-        this.ajvIncomingRequest
-      )
+    this.incomingRequestResponsePayloadValidateFunctions = createPayloadValidatorMap(
+      OCPP20ServiceUtils.createIncomingRequestResponsePayloadConfigs(),
+      OCPP20ServiceUtils.createPayloadOptions(moduleName, 'constructor'),
+      this.ajvIncomingRequest
+    )
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters
-  public async responseHandler<ReqType extends JsonType, ResType extends JsonType>(
+  /**
+   * Check whether a request command is supported by the charging station.
+   * @param chargingStation - Target charging station
+   * @param commandName - Request command to check
+   * @returns Whether the command is supported
+   */
+  protected isRequestCommandSupported (
     chargingStation: ChargingStation,
-    commandName: OCPP20RequestCommand,
-    payload: ResType,
-    requestPayload: ReqType
-  ): Promise<void> {
-    if (
-      chargingStation.inAcceptedState() ||
-      ((chargingStation.inUnknownState() || chargingStation.inPendingState()) &&
-        commandName === OCPP20RequestCommand.BOOT_NOTIFICATION) ||
-      (chargingStation.stationInfo?.ocppStrictCompliance === false &&
-        (chargingStation.inUnknownState() || chargingStation.inPendingState()))
-    ) {
-      if (
-        this.responseHandlers.has(commandName) &&
-        OCPP20ServiceUtils.isRequestCommandSupported(chargingStation, commandName)
-      ) {
-        try {
-          this.validateResponsePayload(chargingStation, commandName, payload)
-          logger.debug(
-            `${chargingStation.logPrefix()} ${moduleName}.responseHandler: Handling '${commandName}' response`
-          )
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          const responseHandler = this.responseHandlers.get(commandName)!
-          if (isAsyncFunction(responseHandler)) {
-            await responseHandler(chargingStation, payload, requestPayload)
-          } else {
-            ;(
-              responseHandler as (
-                chargingStation: ChargingStation,
-                payload: JsonType,
-                requestPayload?: JsonType
-              ) => void
-            )(chargingStation, payload, requestPayload)
-          }
-          logger.debug(
-            `${chargingStation.logPrefix()} ${moduleName}.responseHandler: '${commandName}' response processed successfully`
-          )
-        } catch (error) {
-          logger.error(
-            `${chargingStation.logPrefix()} ${moduleName}.responseHandler: Handle '${commandName}' response error:`,
-            error
-          )
-          throw error
-        }
-      } else {
-        // Throw exception
-        throw new OCPPError(
-          ErrorType.NOT_IMPLEMENTED,
-          `${commandName} is not implemented to handle response PDU ${JSON.stringify(
-            payload,
-            undefined,
-            2
-          )}`,
-          commandName,
-          payload
-        )
-      }
-    } else {
-      throw new OCPPError(
-        ErrorType.SECURITY_ERROR,
-        `${commandName} cannot be issued to handle response PDU ${JSON.stringify(
-          payload,
-          undefined,
-          2
-        )} while the charging station is not registered on the CSMS`,
-        commandName,
-        payload
-      )
-    }
+    commandName: RequestCommand
+  ): boolean {
+    return isRequestCommandSupported(chargingStation, commandName)
+  }
+
+  private handleResponseAuthorize (
+    chargingStation: ChargingStation,
+    payload: OCPP20AuthorizeResponse,
+    requestPayload: OCPP20AuthorizeRequest
+  ): void {
+    logger.debug(
+      `${chargingStation.logPrefix()} ${moduleName}.handleResponseAuthorize: Authorize response received, status: ${payload.idTokenInfo.status}`
+    )
+    // C10.FR.04: Update Authorization Cache entry upon receipt of AuthorizationResponse
+    OCPP20ServiceUtils.updateAuthorizationCache(
+      chargingStation,
+      requestPayload.idToken,
+      payload.idTokenInfo
+    )
   }
 
   private handleResponseBootNotification (
@@ -222,7 +222,10 @@ export class OCPP20ResponseService extends OCPPResponseService {
         )
         addConfigurationKey(
           chargingStation,
-          OCPP20OptionalVariableName.HeartbeatInterval,
+          buildConfigKey(
+            OCPP20ComponentName.OCPPCommCtrlr,
+            OCPP20OptionalVariableName.HeartbeatInterval
+          ),
           payload.interval.toString(),
           {},
           { overwrite: true, save: true }
@@ -259,6 +262,15 @@ export class OCPP20ResponseService extends OCPPResponseService {
     }
   }
 
+  private handleResponseDataTransfer (
+    chargingStation: ChargingStation,
+    payload: OCPP20DataTransferResponse
+  ): void {
+    logger.debug(
+      `${chargingStation.logPrefix()} ${moduleName}.handleResponseDataTransfer: DataTransfer response received, status: ${payload.status}`
+    )
+  }
+
   private handleResponseFirmwareStatusNotification (
     chargingStation: ChargingStation,
     payload: OCPP20FirmwareStatusNotificationResponse
@@ -268,12 +280,30 @@ export class OCPP20ResponseService extends OCPPResponseService {
     )
   }
 
+  private handleResponseGet15118EVCertificate (
+    chargingStation: ChargingStation,
+    payload: OCPP20Get15118EVCertificateResponse
+  ): void {
+    logger.debug(
+      `${chargingStation.logPrefix()} ${moduleName}.handleResponseGet15118EVCertificate: Get15118EVCertificate response received, status: ${payload.status}`
+    )
+  }
+
+  private handleResponseGetCertificateStatus (
+    chargingStation: ChargingStation,
+    payload: OCPP20GetCertificateStatusResponse
+  ): void {
+    logger.debug(
+      `${chargingStation.logPrefix()} ${moduleName}.handleResponseGetCertificateStatus: GetCertificateStatus response received, status: ${payload.status}`
+    )
+  }
+
   private handleResponseHeartbeat (
     chargingStation: ChargingStation,
     payload: OCPP20HeartbeatResponse
   ): void {
     logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.handleResponseHeartbeat: Heartbeat response received at ${payload.currentTime.toISOString()}`
+      `${chargingStation.logPrefix()} ${moduleName}.handleResponseHeartbeat: Heartbeat response received at ${convertToDate(payload.currentTime)?.toISOString() ?? 'unknown'}`
     )
   }
 
@@ -322,6 +352,21 @@ export class OCPP20ResponseService extends OCPPResponseService {
     )
   }
 
+  private handleResponseSignCertificate (
+    chargingStation: ChargingStation,
+    payload: OCPP20SignCertificateResponse,
+    requestPayload: OCPP20SignCertificateRequest
+  ): void {
+    logger.debug(
+      `${chargingStation.logPrefix()} ${moduleName}.handleResponseSignCertificate: SignCertificate response received, status: ${payload.status}`
+    )
+    if (payload.status === GenericStatus.Accepted) {
+      OCPP20IncomingRequestService.getInstance()
+        .getCertSigningRetryManager(chargingStation)
+        .startRetryTimer(requestPayload.certificateType)
+    }
+  }
+
   private handleResponseStatusNotification (
     chargingStation: ChargingStation,
     payload: OCPP20StatusNotificationResponse
@@ -341,14 +386,73 @@ export class OCPP20ResponseService extends OCPPResponseService {
    * @param payload - The TransactionEvent response payload from CSMS
    * @param requestPayload - The original TransactionEvent request payload
    */
-  private handleResponseTransactionEvent (
+  private async handleResponseTransactionEvent (
     chargingStation: ChargingStation,
     payload: OCPP20TransactionEventResponse,
     requestPayload: OCPP20TransactionEventRequest
-  ): void {
+  ): Promise<void> {
     logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.handleResponseTransactionEvent: TransactionEvent response received`
+      `${chargingStation.logPrefix()} ${moduleName}.handleResponseTransactionEvent: TransactionEvent(${requestPayload.eventType}) response received`
     )
+    const connectorId =
+      requestPayload.evse?.connectorId ??
+      requestPayload.evse?.id ??
+      chargingStation.getConnectorIdByTransactionId(requestPayload.transactionInfo.transactionId)
+    const connectorStatus =
+      connectorId != null ? chargingStation.getConnectorStatus(connectorId) : undefined
+
+    switch (requestPayload.eventType) {
+      case OCPP20TransactionEventEnumType.Ended:
+        if (connectorId != null && connectorStatus != null) {
+          await OCPP20ServiceUtils.cleanupEndedTransaction(
+            chargingStation,
+            connectorId,
+            connectorStatus
+          )
+          logger.info(
+            `${chargingStation.logPrefix()} ${moduleName}.handleResponseTransactionEvent: Transaction ${requestPayload.transactionInfo.transactionId} ENDED on connector ${connectorId.toString()}`
+          )
+        }
+        break
+      case OCPP20TransactionEventEnumType.Started:
+        if (connectorStatus != null) {
+          connectorStatus.transactionStarted = true
+          connectorStatus.transactionPending = false
+          connectorStatus.transactionId ??= requestPayload.transactionInfo.transactionId
+          connectorStatus.transactionIdTag ??= requestPayload.idToken?.idToken
+          connectorStatus.transactionStart ??= new Date()
+          connectorStatus.transactionEnergyActiveImportRegisterValue ??= 0
+          const isIdTokenAccepted =
+            payload.idTokenInfo == null ||
+            payload.idTokenInfo.status === OCPP20AuthorizationStatusEnumType.Accepted
+          if (isIdTokenAccepted) {
+            connectorStatus.locked = true
+          }
+          if (connectorId != null && isIdTokenAccepted) {
+            sendAndSetConnectorStatus(chargingStation, {
+              connectorId,
+              connectorStatus: ConnectorStatusEnum.Occupied,
+            } as unknown as OCPP20StatusNotificationRequest).catch((error: unknown) => {
+              logger.error(
+                `${chargingStation.logPrefix()} ${moduleName}.handleResponseTransactionEvent: Error sending StatusNotification(Occupied):`,
+                error
+              )
+            })
+            const txUpdatedInterval = OCPP20ServiceUtils.getTxUpdatedInterval(chargingStation)
+            OCPP20ServiceUtils.startUpdatedMeterValues(
+              chargingStation,
+              connectorId,
+              txUpdatedInterval
+            )
+            const txEndedInterval = OCPP20ServiceUtils.getTxEndedInterval(chargingStation)
+            OCPP20ServiceUtils.startEndedMeterValues(chargingStation, connectorId, txEndedInterval)
+          }
+          logger.info(
+            `${chargingStation.logPrefix()} ${moduleName}.handleResponseTransactionEvent: Transaction ${requestPayload.transactionInfo.transactionId} STARTED on connector ${String(connectorId)}`
+          )
+        }
+        break
+    }
     if (payload.totalCost != null) {
       logger.info(
         `${chargingStation.logPrefix()} ${moduleName}.handleResponseTransactionEvent: Total cost: ${payload.totalCost.toString()}`
@@ -363,41 +467,41 @@ export class OCPP20ResponseService extends OCPPResponseService {
       logger.info(
         `${chargingStation.logPrefix()} ${moduleName}.handleResponseTransactionEvent: IdToken info status: ${payload.idTokenInfo.status}`
       )
-      // D01/D05: Stop transaction when idToken authorization is rejected by CSMS
-      const rejectedStatuses = new Set<OCPP20AuthorizationStatusEnumType>([
-        OCPP20AuthorizationStatusEnumType.Blocked,
-        OCPP20AuthorizationStatusEnumType.Expired,
-        OCPP20AuthorizationStatusEnumType.Invalid,
-        OCPP20AuthorizationStatusEnumType.NoCredit,
-      ])
-      if (rejectedStatuses.has(payload.idTokenInfo.status)) {
+      // E05.FR.09/FR.10 + E06.FR.04: Deauthorize transaction when idToken is not accepted by CSMS
+      if (payload.idTokenInfo.status !== OCPP20AuthorizationStatusEnumType.Accepted) {
         logger.warn(
-          `${chargingStation.logPrefix()} ${moduleName}.handleResponseTransactionEvent: IdToken authorization rejected with status '${payload.idTokenInfo.status}', stopping active transaction per OCPP 2.0.1 spec (D01/D05)`
+          `${chargingStation.logPrefix()} ${moduleName}.handleResponseTransactionEvent: IdToken authorization rejected with status '${payload.idTokenInfo.status}', de-authorizing transaction per E05.FR.09/E05.FR.10/E06.FR.04`
         )
-        // Find the specific connector for this transaction
-        const connectorId = chargingStation.getConnectorIdByTransactionId(
+        const txConnectorId = chargingStation.getConnectorIdByTransactionId(
           requestPayload.transactionInfo.transactionId
         )
-        const evseId = chargingStation.getEvseIdByTransactionId(
+        const txEvseId = chargingStation.getEvseIdByTransactionId(
           requestPayload.transactionInfo.transactionId
         )
-        if (connectorId != null && evseId != null) {
-          logger.info(
-            `${chargingStation.logPrefix()} ${moduleName}.handleResponseTransactionEvent: Stopping transaction ${requestPayload.transactionInfo.transactionId} on EVSE ${evseId.toString()}, connector ${connectorId.toString()} due to rejected idToken`
-          )
-          OCPP20ServiceUtils.requestStopTransaction(chargingStation, connectorId, evseId).catch(
-            (error: unknown) => {
-              logger.error(
-                `${chargingStation.logPrefix()} ${moduleName}.handleResponseTransactionEvent: Error stopping transaction ${requestPayload.transactionInfo.transactionId} on connector ${connectorId.toString()}:`,
-                error
-              )
-            }
-          )
+        if (txConnectorId != null && txEvseId != null) {
+          OCPP20ServiceUtils.requestDeauthorizeTransaction(
+            chargingStation,
+            txConnectorId,
+            txEvseId
+          ).catch((error: unknown) => {
+            logger.error(
+              `${chargingStation.logPrefix()} ${moduleName}.handleResponseTransactionEvent: Error de-authorizing transaction ${requestPayload.transactionInfo.transactionId} on connector ${txConnectorId.toString()}:`,
+              error
+            )
+          })
         } else {
           logger.warn(
-            `${chargingStation.logPrefix()} ${moduleName}.handleResponseTransactionEvent: Could not find connector for transaction ${requestPayload.transactionInfo.transactionId}, cannot stop transaction`
+            `${chargingStation.logPrefix()} ${moduleName}.handleResponseTransactionEvent: Could not find connector for transaction ${requestPayload.transactionInfo.transactionId}, cannot de-authorize`
           )
         }
+      }
+      // C10.FR.01/04/05: Update auth cache with idTokenInfo from response
+      if (requestPayload.idToken != null) {
+        OCPP20ServiceUtils.updateAuthorizationCache(
+          chargingStation,
+          requestPayload.idToken,
+          payload.idTokenInfo
+        )
       }
     }
     if (payload.updatedPersonalMessage != null) {

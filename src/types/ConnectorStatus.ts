@@ -1,4 +1,5 @@
 import type { SampledValueTemplate } from './MeasurandPerPhaseSampledValueTemplates.js'
+import type { OCPP16ChargePointErrorCode } from './ocpp/1.6/ChargePointErrorCode.js'
 import type { OCPP20TransactionEventRequest } from './ocpp/2.0/Transaction.js'
 import type { ChargingProfile } from './ocpp/ChargingProfile.js'
 import type { ConnectorEnumType } from './ocpp/ConnectorEnumType.js'
@@ -7,47 +8,47 @@ import type { MeterValue } from './ocpp/MeterValues.js'
 import type { AvailabilityType } from './ocpp/Requests.js'
 import type { Reservation } from './ocpp/Reservation.js'
 
+export interface ConnectorEntry {
+  readonly connectorId: number
+  readonly connectorStatus: ConnectorStatus
+  readonly evseId: number | undefined
+}
+
 export interface ConnectorStatus {
   authorizeIdTag?: string
   availability: AvailabilityType
   bootStatus?: ConnectorStatusEnum
   chargingProfiles?: ChargingProfile[]
   energyActiveImportRegisterValue?: number // In Wh
+  errorCode?: OCPP16ChargePointErrorCode
   idTagAuthorized?: boolean
   idTagLocalAuthorized?: boolean
   localAuthorizeIdTag?: string
+  locked?: boolean
+  maximumPower?: number // In W
   MeterValues: SampledValueTemplate[]
+  publicKeySentInTransaction?: boolean
   remoteStartId?: number
   reservation?: Reservation
   status?: ConnectorStatusEnum
   transactionBeginMeterValue?: MeterValue
+  transactionDeauthorized?: boolean
+  transactionDeauthorizedEnergyWh?: number
+  transactionEndedMeterValues?: MeterValue[]
+  transactionEndedMeterValuesSetInterval?: NodeJS.Timeout
   transactionEnergyActiveImportRegisterValue?: number // In Wh
-  /**
-   * OCPP 2.0.1 offline-first: Queue of TransactionEvents waiting to be sent
-   * Events are queued when station is offline (websocket disconnected)
-   * and replayed in order when reconnected, with seqNo preserved
-   */
   transactionEventQueue?: QueuedTransactionEvent[]
-  /**
-   * OCPP 2.0.1 E01.FR.16 compliance: Track if evse has been sent for current transaction.
-   * The evse field should only be provided in the first TransactionEventRequest
-   * that occurs after the EV has connected.
-   */
   transactionEvseSent?: boolean
+  transactionGroupIdToken?: string
   transactionId?: number | string
   transactionIdTag?: string
-  /**
-   * OCPP 2.0.1 E03.FR.01 compliance: Track if idToken has been sent for current transaction.
-   * The idToken field should be provided once in the first TransactionEventRequest
-   * that occurs after the transaction has been authorized.
-   */
   transactionIdTokenSent?: boolean
+  transactionPending?: boolean
   transactionRemoteStarted?: boolean
   transactionSeqNo?: number
-  transactionSetInterval?: NodeJS.Timeout
   transactionStart?: Date
   transactionStarted?: boolean
-  transactionTxUpdatedSetInterval?: NodeJS.Timeout
+  transactionUpdatedMeterValuesSetInterval?: NodeJS.Timeout
   type?: ConnectorEnumType
 }
 

@@ -10,6 +10,7 @@ import {
   AuthenticationError,
   AuthErrorCode,
   AuthorizationStatus,
+  type Identifier,
   IdentifierType,
   isCertificateBased,
   isOCPP16Type,
@@ -20,14 +21,13 @@ import {
   mapToOCPP20Status,
   mapToOCPP20TokenType,
   requiresAdditionalInfo,
-  type UnifiedIdentifier,
 } from '../../../../../src/charging-station/ocpp/auth/types/AuthTypes.js'
-import { OCPP16AuthorizationStatus } from '../../../../../src/types/ocpp/1.6/Transaction.js'
 import {
+  OCPP16AuthorizationStatus,
   OCPP20IdTokenEnumType,
+  OCPPVersion,
   RequestStartStopStatusEnumType,
-} from '../../../../../src/types/ocpp/2.0/Transaction.js'
-import { OCPPVersion } from '../../../../../src/types/ocpp/OCPPVersion.js'
+} from '../../../../../src/types/index.js'
 import { standardCleanup } from '../../../../helpers/TestLifecycleHelpers.js'
 
 await describe('AuthTypes', async () => {
@@ -66,71 +66,71 @@ await describe('AuthTypes', async () => {
 
   await describe('TypeMappers', async () => {
     await describe('OCPP 1.6 Status Mapping', async () => {
-      await it('should map OCPP 1.6 ACCEPTED to unified ACCEPTED', () => {
+      await it('should map OCPP 1.6 ACCEPTED to ACCEPTED', () => {
         const result = mapOCPP16Status(OCPP16AuthorizationStatus.ACCEPTED)
         assert.strictEqual(result, AuthorizationStatus.ACCEPTED)
       })
 
-      await it('should map OCPP 1.6 BLOCKED to unified BLOCKED', () => {
+      await it('should map OCPP 1.6 BLOCKED to BLOCKED', () => {
         const result = mapOCPP16Status(OCPP16AuthorizationStatus.BLOCKED)
         assert.strictEqual(result, AuthorizationStatus.BLOCKED)
       })
 
-      await it('should map OCPP 1.6 EXPIRED to unified EXPIRED', () => {
+      await it('should map OCPP 1.6 EXPIRED to EXPIRED', () => {
         const result = mapOCPP16Status(OCPP16AuthorizationStatus.EXPIRED)
         assert.strictEqual(result, AuthorizationStatus.EXPIRED)
       })
 
-      await it('should map OCPP 1.6 INVALID to unified INVALID', () => {
+      await it('should map OCPP 1.6 INVALID to INVALID', () => {
         const result = mapOCPP16Status(OCPP16AuthorizationStatus.INVALID)
         assert.strictEqual(result, AuthorizationStatus.INVALID)
       })
 
-      await it('should map OCPP 1.6 CONCURRENT_TX to unified CONCURRENT_TX', () => {
+      await it('should map OCPP 1.6 CONCURRENT_TX to CONCURRENT_TX', () => {
         const result = mapOCPP16Status(OCPP16AuthorizationStatus.CONCURRENT_TX)
         assert.strictEqual(result, AuthorizationStatus.CONCURRENT_TX)
       })
     })
 
     await describe('OCPP 2.0 Token Type Mapping', async () => {
-      await it('should map OCPP 2.0 Central to unified CENTRAL', () => {
+      await it('should map OCPP 2.0 Central to CENTRAL', () => {
         const result = mapOCPP20TokenType(OCPP20IdTokenEnumType.Central)
         assert.strictEqual(result, IdentifierType.CENTRAL)
       })
 
-      await it('should map OCPP 2.0 Local to unified LOCAL', () => {
+      await it('should map OCPP 2.0 Local to LOCAL', () => {
         const result = mapOCPP20TokenType(OCPP20IdTokenEnumType.Local)
         assert.strictEqual(result, IdentifierType.LOCAL)
       })
 
-      await it('should map OCPP 2.0 eMAID to unified E_MAID', () => {
+      await it('should map OCPP 2.0 eMAID to E_MAID', () => {
         const result = mapOCPP20TokenType(OCPP20IdTokenEnumType.eMAID)
         assert.strictEqual(result, IdentifierType.E_MAID)
       })
 
-      await it('should map OCPP 2.0 ISO14443 to unified ISO14443', () => {
+      await it('should map OCPP 2.0 ISO14443 to ISO14443', () => {
         const result = mapOCPP20TokenType(OCPP20IdTokenEnumType.ISO14443)
         assert.strictEqual(result, IdentifierType.ISO14443)
       })
 
-      await it('should map OCPP 2.0 KeyCode to unified KEY_CODE', () => {
+      await it('should map OCPP 2.0 KeyCode to KEY_CODE', () => {
         const result = mapOCPP20TokenType(OCPP20IdTokenEnumType.KeyCode)
         assert.strictEqual(result, IdentifierType.KEY_CODE)
       })
     })
 
-    await describe('Unified to OCPP 1.6 Status Mapping', async () => {
-      await it('should map unified ACCEPTED to OCPP 1.6 ACCEPTED', () => {
+    await describe('Auth to OCPP 1.6 Status Mapping', async () => {
+      await it('should map ACCEPTED to OCPP 1.6 ACCEPTED', () => {
         const result = mapToOCPP16Status(AuthorizationStatus.ACCEPTED)
         assert.strictEqual(result, OCPP16AuthorizationStatus.ACCEPTED)
       })
 
-      await it('should map unified BLOCKED to OCPP 1.6 BLOCKED', () => {
+      await it('should map BLOCKED to OCPP 1.6 BLOCKED', () => {
         const result = mapToOCPP16Status(AuthorizationStatus.BLOCKED)
         assert.strictEqual(result, OCPP16AuthorizationStatus.BLOCKED)
       })
 
-      await it('should map unified EXPIRED to OCPP 1.6 EXPIRED', () => {
+      await it('should map EXPIRED to OCPP 1.6 EXPIRED', () => {
         const result = mapToOCPP16Status(AuthorizationStatus.EXPIRED)
         assert.strictEqual(result, OCPP16AuthorizationStatus.EXPIRED)
       })
@@ -151,8 +151,8 @@ await describe('AuthTypes', async () => {
       })
     })
 
-    await describe('Unified to OCPP 2.0 Status Mapping', async () => {
-      await it('should map unified ACCEPTED to OCPP 2.0 Accepted', () => {
+    await describe('Auth to OCPP 2.0 Status Mapping', async () => {
+      await it('should map ACCEPTED to OCPP 2.0 Accepted', () => {
         const result = mapToOCPP20Status(AuthorizationStatus.ACCEPTED)
         assert.strictEqual(result, RequestStartStopStatusEnumType.Accepted)
       })
@@ -173,23 +173,23 @@ await describe('AuthTypes', async () => {
       })
     })
 
-    await describe('Unified to OCPP 2.0 Token Type Mapping', async () => {
-      await it('should map unified CENTRAL to OCPP 2.0 Central', () => {
+    await describe('Auth to OCPP 2.0 Token Type Mapping', async () => {
+      await it('should map CENTRAL to OCPP 2.0 Central', () => {
         const result = mapToOCPP20TokenType(IdentifierType.CENTRAL)
         assert.strictEqual(result, OCPP20IdTokenEnumType.Central)
       })
 
-      await it('should map unified E_MAID to OCPP 2.0 eMAID', () => {
+      await it('should map E_MAID to OCPP 2.0 eMAID', () => {
         const result = mapToOCPP20TokenType(IdentifierType.E_MAID)
         assert.strictEqual(result, OCPP20IdTokenEnumType.eMAID)
       })
 
-      await it('should map unified ID_TAG to OCPP 2.0 Local', () => {
+      await it('should map ID_TAG to OCPP 2.0 Local', () => {
         const result = mapToOCPP20TokenType(IdentifierType.ID_TAG)
         assert.strictEqual(result, OCPP20IdTokenEnumType.Local)
       })
 
-      await it('should map unified LOCAL to OCPP 2.0 Local', () => {
+      await it('should map LOCAL to OCPP 2.0 Local', () => {
         const result = mapToOCPP20TokenType(IdentifierType.LOCAL)
         assert.strictEqual(result, OCPP20IdTokenEnumType.Local)
       })
@@ -249,46 +249,41 @@ await describe('AuthTypes', async () => {
     })
   })
 
-  await describe('UnifiedIdentifier', async () => {
+  await describe('Identifier', async () => {
     await it('should create valid OCPP 1.6 identifier', () => {
-      const identifier: UnifiedIdentifier = {
-        ocppVersion: OCPPVersion.VERSION_16,
+      const identifier: Identifier = {
         type: IdentifierType.ID_TAG,
         value: 'VALID_ID_TAG',
       }
 
       assert.strictEqual(identifier.value, 'VALID_ID_TAG')
       assert.strictEqual(identifier.type, IdentifierType.ID_TAG)
-      assert.strictEqual(identifier.ocppVersion, OCPPVersion.VERSION_16)
     })
 
     await it('should create valid OCPP 2.0 identifier with additional info', () => {
-      const identifier: UnifiedIdentifier = {
+      const identifier: Identifier = {
         additionalInfo: {
           contractId: 'CONTRACT123',
           issuer: 'EMSProvider',
         },
-        ocppVersion: OCPPVersion.VERSION_20,
         type: IdentifierType.E_MAID,
         value: 'EMAID123456',
       }
 
       assert.strictEqual(identifier.value, 'EMAID123456')
       assert.strictEqual(identifier.type, IdentifierType.E_MAID)
-      assert.strictEqual(identifier.ocppVersion, OCPPVersion.VERSION_20)
       assert.notStrictEqual(identifier.additionalInfo, undefined)
       assert.strictEqual(identifier.additionalInfo?.issuer, 'EMSProvider')
     })
 
     await it('should support certificate-based identifier', () => {
-      const identifier: UnifiedIdentifier = {
+      const identifier: Identifier = {
         certificateHashData: {
           hashAlgorithm: 'SHA256',
           issuerKeyHash: 'KEY_HASH',
           issuerNameHash: 'ISSUER_HASH',
           serialNumber: '123456',
         },
-        ocppVersion: OCPPVersion.VERSION_20,
         type: IdentifierType.CERTIFICATE,
         value: 'CERT_IDENTIFIER',
       }

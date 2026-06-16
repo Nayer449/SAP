@@ -1,45 +1,30 @@
 import type { ValidateFunction } from 'ajv'
 
-import { generateKeyPairSync } from 'node:crypto'
-
 import type { ChargingStation } from '../../../charging-station/index.js'
 import type { OCPPResponseService } from '../OCPPResponseService.js'
 
+import { getConfigurationKey } from '../../../charging-station/index.js'
 import { OCPPError } from '../../../exception/index.js'
 import {
-  type CertificateActionEnumType,
   type CertificateSigningUseEnumType,
   ErrorType,
-  type FirmwareStatusEnumType,
   type JsonObject,
   type JsonType,
-  type OCPP20FirmwareStatusNotificationRequest,
-  type OCPP20FirmwareStatusNotificationResponse,
-  type OCPP20Get15118EVCertificateRequest,
-  type OCPP20Get15118EVCertificateResponse,
-  type OCPP20GetCertificateStatusRequest,
-  type OCPP20GetCertificateStatusResponse,
-  type OCPP20LogStatusNotificationRequest,
-  type OCPP20LogStatusNotificationResponse,
-  type OCPP20MeterValue,
-  type OCPP20MeterValuesRequest,
-  type OCPP20MeterValuesResponse,
-  type OCPP20NotifyCustomerInformationRequest,
-  type OCPP20NotifyCustomerInformationResponse,
+  OCPP20ComponentName,
   OCPP20RequestCommand,
-  type OCPP20SecurityEventNotificationRequest,
-  type OCPP20SecurityEventNotificationResponse,
+  OCPP20RequiredVariableName,
   type OCPP20SignCertificateRequest,
-  type OCPP20SignCertificateResponse,
+  type OCPP20StatusNotificationRequest,
+  type OCPP20TransactionEventOptions,
   OCPPVersion,
-  type OCSPRequestDataType,
   type RequestParams,
-  type UploadLogStatusEnumType,
 } from '../../../types/index.js'
-import { generateUUID, logger } from '../../../utils/index.js'
+import { generateUUID, getErrorMessage, logger } from '../../../utils/index.js'
 import { OCPPRequestService } from '../OCPPRequestService.js'
+import { createPayloadValidatorMap, isRequestCommandSupported } from '../OCPPServiceUtils.js'
+import { generatePkcs10Csr } from './Asn1DerUtils.js'
 import { OCPP20Constants } from './OCPP20Constants.js'
-import { OCPP20ServiceUtils } from './OCPP20ServiceUtils.js'
+import { buildTransactionEvent, OCPP20ServiceUtils } from './OCPP20ServiceUtils.js'
 
 const moduleName = 'OCPP20RequestService'
 
@@ -78,154 +63,12 @@ export class OCPP20RequestService extends OCPPRequestService {
    */
   public constructor (ocppResponseService: OCPPResponseService) {
     super(OCPPVersion.VERSION_201, ocppResponseService)
-    this.payloadValidatorFunctions = OCPP20ServiceUtils.createPayloadValidatorMap(
+    this.payloadValidatorFunctions = createPayloadValidatorMap(
       OCPP20ServiceUtils.createRequestPayloadConfigs(),
       OCPP20ServiceUtils.createPayloadOptions(moduleName, 'constructor'),
       this.ajv
     )
     this.buildRequestPayload = this.buildRequestPayload.bind(this)
-  }
-
-  /**
-   * Send a FirmwareStatusNotification to the CSMS.
-   *
-   * Notifies the CSMS about the progress of a firmware update on the charging station.
-   * Per OCPP 2.0.1 use case J01, the CS sends firmware status updates during the
-   * download, verification, and installation phases of a firmware update.
-   * The response is an empty object — the CSMS acknowledges receipt without data.
-   * @param chargingStation - The charging station reporting the firmware status
-   * @param status - Current firmware update status (e.g., Downloading, Installed)
-   * @param requestId - The request ID from the original UpdateFirmware request
-   * @returns Promise resolving to the empty CSMS acknowledgement response
-   */
-  public async requestFirmwareStatusNotification (
-    chargingStation: ChargingStation,
-    status: FirmwareStatusEnumType,
-    requestId?: number
-  ): Promise<OCPP20FirmwareStatusNotificationResponse> {
-    logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.requestFirmwareStatusNotification: Sending FirmwareStatusNotification with status '${status}'`
-    )
-
-    const requestPayload: OCPP20FirmwareStatusNotificationRequest = {
-      status,
-      ...(requestId !== undefined && { requestId }),
-    }
-
-    const messageId = generateUUID()
-    logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.requestFirmwareStatusNotification: Sending FirmwareStatusNotification request with message ID '${messageId}'`
-    )
-
-    const response = (await this.sendMessage(
-      chargingStation,
-      messageId,
-      requestPayload,
-      OCPP20RequestCommand.FIRMWARE_STATUS_NOTIFICATION
-    )) as OCPP20FirmwareStatusNotificationResponse
-
-    logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.requestFirmwareStatusNotification: Received response`
-    )
-
-    return response
-  }
-
-  /**
-   * Request an ISO 15118 EV certificate from the CSMS.
-   *
-   * Forwards an EXI-encoded certificate request from the EV to the CSMS.
-   * The EXI payload is passed through unmodified (base64 string) without
-   * any decoding or validation - the CSMS is responsible for processing it.
-   *
-   * This is used during ISO 15118 Plug & Charge flows when the EV requests
-   * certificate installation or update from the Mobility Operator (MO).
-   * @param chargingStation - The charging station forwarding the request
-   * @param iso15118SchemaVersion - Schema version identifier (e.g., 'urn:iso:15118:2:2013:MsgDef')
-   * @param action - The certificate action type (Install or Update)
-   * @param exiRequest - Base64-encoded EXI request from the EV (passed through unchanged)
-   * @returns Promise resolving to the CSMS response with EXI-encoded certificate data
-   */
-  public async requestGet15118EVCertificate (
-    chargingStation: ChargingStation,
-    iso15118SchemaVersion: string,
-    action: CertificateActionEnumType,
-    exiRequest: string
-  ): Promise<OCPP20Get15118EVCertificateResponse> {
-    logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.requestGet15118EVCertificate: Requesting ISO 15118 EV certificate`
-    )
-
-    const requestPayload: OCPP20Get15118EVCertificateRequest = {
-      action,
-      exiRequest,
-      iso15118SchemaVersion,
-    }
-
-    const messageId = generateUUID()
-    logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.requestGet15118EVCertificate: Sending Get15118EVCertificate request with message ID '${messageId}'`
-    )
-
-    const response = (await this.sendMessage(
-      chargingStation,
-      messageId,
-      requestPayload,
-      OCPP20RequestCommand.GET_15118_EV_CERTIFICATE
-    )) as OCPP20Get15118EVCertificateResponse
-
-    logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.requestGet15118EVCertificate: Received response with status '${response.status}'`
-    )
-
-    return response
-  }
-
-  /**
-   * Request OCSP certificate status from the CSMS.
-   *
-   * Sends an OCSP (Online Certificate Status Protocol) request to the CSMS
-   * to check the revocation status of a certificate. The CSMS will return
-   * the OCSP response data which can be used to verify certificate validity.
-   *
-   * This is used to validate certificates during ISO 15118 communication
-   * before accepting them for charging authorization.
-   *
-   * Note: This is a stub implementation for simulator testing. No real OCSP
-   * network calls are made - the CSMS provides the response.
-   * @param chargingStation - The charging station requesting the status
-   * @param ocspRequestData - OCSP request data including certificate hash and responder URL
-   * @returns Promise resolving to the CSMS response with OCSP result
-   */
-  public async requestGetCertificateStatus (
-    chargingStation: ChargingStation,
-    ocspRequestData: OCSPRequestDataType
-  ): Promise<OCPP20GetCertificateStatusResponse> {
-    logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.requestGetCertificateStatus: Requesting certificate status`
-    )
-
-    const requestPayload: OCPP20GetCertificateStatusRequest = {
-      ocspRequestData,
-    }
-
-    const messageId = generateUUID()
-    logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.requestGetCertificateStatus: Sending GetCertificateStatus request with message ID '${messageId}'`
-    )
-
-    const response = (await this.sendMessage(
-      chargingStation,
-      messageId,
-      requestPayload,
-      OCPP20RequestCommand.GET_CERTIFICATE_STATUS
-    )) as OCPP20GetCertificateStatusResponse
-
-    logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.requestGetCertificateStatus: Received response with status '${response.status}'`
-    )
-
-    return response
   }
 
   /**
@@ -261,16 +104,15 @@ export class OCPP20RequestService extends OCPPRequestService {
     logger.debug(
       `${chargingStation.logPrefix()} ${moduleName}.requestHandler: Processing '${commandName}' request`
     )
-    if (OCPP20ServiceUtils.isRequestCommandSupported(chargingStation, commandName)) {
+    if (isRequestCommandSupported(chargingStation, commandName)) {
       try {
         logger.debug(
           `${chargingStation.logPrefix()} ${moduleName}.requestHandler: Building request payload for '${commandName}'`
         )
-        const requestPayload = this.buildRequestPayload<RequestType>(
-          chargingStation,
-          commandName,
-          commandParams
-        )
+        const requestPayload =
+          params?.rawPayload === true
+            ? (commandParams as RequestType)
+            : this.buildRequestPayload<RequestType>(chargingStation, commandName, commandParams)
         const messageId = generateUUID()
         logger.debug(
           `${chargingStation.logPrefix()} ${moduleName}.requestHandler: Sending '${commandName}' request with message ID '${messageId}'`
@@ -300,323 +142,74 @@ export class OCPP20RequestService extends OCPPRequestService {
     throw new OCPPError(ErrorType.NOT_SUPPORTED, errorMsg, commandName, commandParams)
   }
 
-  /**
-   * Send a LogStatusNotification to the CSMS.
-   *
-   * Notifies the CSMS about the progress of a log upload on the charging station.
-   * Per OCPP 2.0.1 use case M04, the CS sends log upload status updates during
-   * the upload process. The response is an empty object — the CSMS acknowledges
-   * receipt without data.
-   * @param chargingStation - The charging station reporting the log upload status
-   * @param status - Current log upload status (e.g., Uploading, Uploaded)
-   * @param requestId - The request ID from the original GetLog request
-   * @returns Promise resolving to the empty CSMS acknowledgement response
-   */
-  public async requestLogStatusNotification (
-    chargingStation: ChargingStation,
-    status: UploadLogStatusEnumType,
-    requestId?: number
-  ): Promise<OCPP20LogStatusNotificationResponse> {
-    logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.requestLogStatusNotification: Sending LogStatusNotification with status '${status}'`
-    )
-
-    const requestPayload: OCPP20LogStatusNotificationRequest = {
-      status,
-      ...(requestId !== undefined && { requestId }),
-    }
-
-    const messageId = generateUUID()
-    logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.requestLogStatusNotification: Sending LogStatusNotification request with message ID '${messageId}'`
-    )
-
-    const response = (await this.sendMessage(
-      chargingStation,
-      messageId,
-      requestPayload,
-      OCPP20RequestCommand.LOG_STATUS_NOTIFICATION
-    )) as OCPP20LogStatusNotificationResponse
-
-    logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.requestLogStatusNotification: Received response`
-    )
-
-    return response
-  }
-
-  /**
-   * Send MeterValues to the CSMS.
-   *
-   * Reports meter values for a specific EVSE to the CSMS outside of a transaction context.
-   * Per OCPP 2.0.1, the charging station may send sampled meter values (e.g., energy, power,
-   * voltage, current) at configured intervals or upon trigger. Each meter value contains
-   * one or more sampled values all taken at the same point in time.
-   * The response is an empty object — the CSMS acknowledges receipt without data.
-   * @param chargingStation - The charging station reporting the meter values
-   * @param evseId - The EVSE identifier (0 for main power meter, >0 for specific EVSE)
-   * @param meterValue - Array of meter value objects, each containing timestamped sampled values
-   * @returns Promise resolving to the empty CSMS acknowledgement response
-   */
-  public async requestMeterValues (
-    chargingStation: ChargingStation,
-    evseId: number,
-    meterValue: OCPP20MeterValue[]
-  ): Promise<OCPP20MeterValuesResponse> {
-    logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.requestMeterValues: Sending MeterValues for EVSE ${evseId.toString()}`
-    )
-
-    const requestPayload: OCPP20MeterValuesRequest = {
-      evseId,
-      meterValue,
-    }
-
-    const messageId = generateUUID()
-    logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.requestMeterValues: Sending MeterValues request with message ID '${messageId}'`
-    )
-
-    const response = (await this.sendMessage(
-      chargingStation,
-      messageId,
-      requestPayload,
-      OCPP20RequestCommand.METER_VALUES
-    )) as OCPP20MeterValuesResponse
-
-    logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.requestMeterValues: Received response`
-    )
-
-    return response
-  }
-
-  /**
-   * Send NotifyCustomerInformation to the CSMS.
-   *
-   * Notifies the CSMS about customer information availability.
-   * For the simulator, this sends empty customer data as no real customer
-   * information is stored (GDPR compliance).
-   * @param chargingStation - The charging station sending the notification
-   * @param requestId - The request ID from the original CustomerInformation request
-   * @param data - Customer information data (empty string for simulator)
-   * @param seqNo - Sequence number for the notification
-   * @param generatedAt - Timestamp when the data was generated
-   * @param tbc - To be continued flag (false for simulator)
-   * @returns Promise resolving when the notification is sent
-   */
-  public async requestNotifyCustomerInformation (
-    chargingStation: ChargingStation,
-    requestId: number,
-    data: string,
-    seqNo: number,
-    generatedAt: Date,
-    tbc: boolean
-  ): Promise<OCPP20NotifyCustomerInformationResponse> {
-    logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.requestNotifyCustomerInformation: Sending NotifyCustomerInformation`
-    )
-
-    const requestPayload: OCPP20NotifyCustomerInformationRequest = {
-      data,
-      generatedAt,
-      requestId,
-      seqNo,
-      tbc,
-    }
-
-    const messageId = generateUUID()
-    logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.requestNotifyCustomerInformation: Sending NotifyCustomerInformation request with message ID '${messageId}'`
-    )
-
-    const response = (await this.sendMessage(
-      chargingStation,
-      messageId,
-      requestPayload,
-      OCPP20RequestCommand.NOTIFY_CUSTOMER_INFORMATION
-    )) as OCPP20NotifyCustomerInformationResponse
-
-    logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.requestNotifyCustomerInformation: Received response`
-    )
-
-    return response
-  }
-
-  /**
-   * Send a SecurityEventNotification to the CSMS.
-   *
-   * Notifies the CSMS about a security event that occurred at the charging station.
-   * Per OCPP 2.0.1 use case A04, the CS sends security events (e.g., tamper detection,
-   * firmware validation failure, invalid certificate) to keep the CSMS informed.
-   * The response is an empty object — the CSMS acknowledges receipt without data.
-   * @param chargingStation - The charging station reporting the security event
-   * @param type - Type of the security event (from the Security events list, max 50 chars)
-   * @param timestamp - Date and time at which the event occurred
-   * @param techInfo - Optional additional technical information about the event (max 255 chars)
-   * @returns Promise resolving to the empty CSMS acknowledgement response
-   */
-  public async requestSecurityEventNotification (
-    chargingStation: ChargingStation,
-    type: string,
-    timestamp: Date,
-    techInfo?: string
-  ): Promise<OCPP20SecurityEventNotificationResponse> {
-    logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.requestSecurityEventNotification: Sending SecurityEventNotification`
-    )
-
-    const requestPayload: OCPP20SecurityEventNotificationRequest = {
-      timestamp,
-      type,
-      ...(techInfo !== undefined && { techInfo }),
-    }
-
-    const messageId = generateUUID()
-    logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.requestSecurityEventNotification: Sending SecurityEventNotification request with message ID '${messageId}'`
-    )
-
-    const response = (await this.sendMessage(
-      chargingStation,
-      messageId,
-      requestPayload,
-      OCPP20RequestCommand.SECURITY_EVENT_NOTIFICATION
-    )) as OCPP20SecurityEventNotificationResponse
-
-    logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.requestSecurityEventNotification: Received response`
-    )
-
-    return response
-  }
-
-  /**
-   * Request certificate signing from the CSMS.
-   *
-   * Generates a Certificate Signing Request (CSR) using the charging station's
-   * certificate manager and sends it to the CSMS for signing. Supports both
-   * ChargingStationCertificate and V2GCertificate types.
-   *
-   * IMPORTANT: This implementation generates a MOCK CSR for simulator testing purposes.
-   * It is NOT a cryptographically valid PKCS#10 CSR and MUST NOT be used in production.
-   * The generated CSR structure is simplified (JSON-based) for OCPP message testing only.
-   * Real CSMS expecting valid PKCS#10 CSR will reject this format.
-   * @param chargingStation - The charging station requesting the certificate
-   * @param certificateType - Optional certificate type (ChargingStationCertificate or V2GCertificate)
-   * @returns Promise resolving to the CSMS response with Accepted or Rejected status
-   * @throws {OCPPError} When certificate manager is unavailable or CSR generation fails
-   */
-  public async requestSignCertificate (
-    chargingStation: ChargingStation,
-    certificateType?: CertificateSigningUseEnumType
-  ): Promise<OCPP20SignCertificateResponse> {
-    logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.requestSignCertificate: Requesting certificate signing`
-    )
-
-    let csr: string
-    try {
-      const { publicKey } = generateKeyPairSync('rsa', {
-        modulusLength: 2048,
-        privateKeyEncoding: { format: 'pem', type: 'pkcs8' },
-        publicKeyEncoding: { format: 'pem', type: 'spki' },
-      })
-
-      const configKey = chargingStation.ocppConfiguration?.configurationKey?.find(
-        key => key.key === 'SecurityCtrlr.OrganizationName'
-      )
-      const orgName = configKey?.value ?? 'Unknown'
-      const stationId = chargingStation.stationInfo?.chargingStationId ?? 'Unknown'
-      const subject = `CN=${stationId},O=${orgName}`
-
-      // Generate simplified mock CSR for simulator testing
-      // WARNING: This is NOT a cryptographically valid PKCS#10 CSR
-      // Structure: JSON with subject, publicKey, timestamp (NOT ASN.1 DER)
-      const mockCsrData = {
-        algorithm: 'RSA-SHA256',
-        keySize: 2048,
-        publicKey: publicKey.replace(/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\n/g, ''),
-        subject,
-        timestamp: new Date().toISOString(),
-      }
-
-      const csrBase64 = Buffer.from(JSON.stringify(mockCsrData)).toString('base64')
-      csr = `-----BEGIN CERTIFICATE REQUEST-----\n${csrBase64}\n-----END CERTIFICATE REQUEST-----`
-    } catch (error) {
-      const errorMsg = `Failed to generate CSR: ${error instanceof Error ? error.message : 'Unknown error'}`
-      logger.error(
-        `${chargingStation.logPrefix()} ${moduleName}.requestSignCertificate: ${errorMsg}`
-      )
-      throw new OCPPError(ErrorType.INTERNAL_ERROR, errorMsg, OCPP20RequestCommand.SIGN_CERTIFICATE)
-    }
-
-    const requestPayload: OCPP20SignCertificateRequest = {
-      csr,
-    }
-
-    if (certificateType != null) {
-      requestPayload.certificateType = certificateType
-    }
-
-    const messageId = generateUUID()
-    logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.requestSignCertificate: Sending SignCertificate request with message ID '${messageId}'`
-    )
-
-    const response = (await this.sendMessage(
-      chargingStation,
-      messageId,
-      requestPayload,
-      OCPP20RequestCommand.SIGN_CERTIFICATE
-    )) as OCPP20SignCertificateResponse
-
-    logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.requestSignCertificate: Received response with status '${response.status}'`
-    )
-
-    return response
-  }
-
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters
   private buildRequestPayload<Request extends JsonType>(
     chargingStation: ChargingStation,
     commandName: OCPP20RequestCommand,
     commandParams?: JsonType
   ): Request {
-    commandParams = commandParams as JsonObject
     logger.debug(
-      `${chargingStation.logPrefix()} ${moduleName}.buildRequestPayload: Building ${commandName} payload`
+      `${chargingStation.logPrefix()} ${moduleName}.buildRequestPayload: Building '${commandName}' payload`
     )
     switch (commandName) {
+      case OCPP20RequestCommand.AUTHORIZE:
       case OCPP20RequestCommand.BOOT_NOTIFICATION:
-        return commandParams as unknown as Request
+      case OCPP20RequestCommand.DATA_TRANSFER:
       case OCPP20RequestCommand.FIRMWARE_STATUS_NOTIFICATION:
       case OCPP20RequestCommand.GET_15118_EV_CERTIFICATE:
       case OCPP20RequestCommand.GET_CERTIFICATE_STATUS:
       case OCPP20RequestCommand.LOG_STATUS_NOTIFICATION:
       case OCPP20RequestCommand.METER_VALUES:
       case OCPP20RequestCommand.NOTIFY_CUSTOMER_INFORMATION:
+      case OCPP20RequestCommand.NOTIFY_REPORT:
       case OCPP20RequestCommand.SECURITY_EVENT_NOTIFICATION:
-      case OCPP20RequestCommand.SIGN_CERTIFICATE:
         return commandParams as unknown as Request
       case OCPP20RequestCommand.HEARTBEAT:
         return OCPP20Constants.OCPP_RESPONSE_EMPTY as unknown as Request
-      case OCPP20RequestCommand.NOTIFY_REPORT:
-        return {
-          ...commandParams,
-        } as unknown as Request
+      case OCPP20RequestCommand.SIGN_CERTIFICATE: {
+        let csr: string
+        try {
+          const configKey = getConfigurationKey(
+            chargingStation,
+            `${OCPP20ComponentName.SecurityCtrlr}.${OCPP20RequiredVariableName.OrganizationName}`
+          )
+          const orgName = configKey?.value ?? 'Unknown'
+          const stationId = chargingStation.stationInfo?.chargingStationId ?? 'Unknown'
+
+          csr = generatePkcs10Csr(stationId, orgName)
+        } catch (error) {
+          const errorMsg = `Failed to generate CSR: ${getErrorMessage(error)}`
+          logger.error(
+            `${chargingStation.logPrefix()} ${moduleName}.buildRequestPayload: ${errorMsg}`
+          )
+          throw new OCPPError(
+            ErrorType.INTERNAL_ERROR,
+            errorMsg,
+            OCPP20RequestCommand.SIGN_CERTIFICATE
+          )
+        }
+
+        const certificateType = (commandParams as JsonObject | undefined)?.certificateType as
+          | CertificateSigningUseEnumType
+          | undefined
+
+        const requestPayload: OCPP20SignCertificateRequest = {
+          csr,
+          ...(certificateType != null && { certificateType }),
+        }
+
+        return requestPayload as unknown as Request
+      }
       case OCPP20RequestCommand.STATUS_NOTIFICATION:
-        return {
-          timestamp: new Date(),
-          ...commandParams,
-        } as unknown as Request
+        return OCPP20ServiceUtils.buildStatusNotificationRequest(
+          chargingStation,
+          commandParams as unknown as OCPP20StatusNotificationRequest
+        ) as unknown as Request
       case OCPP20RequestCommand.TRANSACTION_EVENT:
-        return {
-          timestamp: new Date(),
-          ...commandParams,
-        } as unknown as Request
+        return buildTransactionEvent(
+          chargingStation,
+          commandParams as unknown as OCPP20TransactionEventOptions
+        ) as unknown as Request
       default: {
         // OCPPError usage here is debatable: it's an error in the OCPP stack but not targeted to sendError().
         const errorMsg = `Unsupported OCPP command ${commandName as string} for payload building`

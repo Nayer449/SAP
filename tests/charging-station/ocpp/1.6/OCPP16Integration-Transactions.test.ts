@@ -1,5 +1,5 @@
 /**
- * @file Tests for OCPP 1.6 integration — Transaction lifecycle
+ * @file Tests for OCPP 1.6 Transaction lifecycle integration
  * @module OCPP 1.6 — §5.11 RemoteStartTransaction, §5.12 RemoteStopTransaction,
  *   §5.14 StartTransaction (response), §5.16 StopTransaction (response)
  * @description Multi-step integration tests crossing IncomingRequestService, RequestService,
@@ -7,41 +7,40 @@
  */
 
 import assert from 'node:assert/strict'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 
-import type { ChargingStation } from '../../../../src/charging-station/ChargingStation.js'
+import type { ChargingStation } from '../../../../src/charging-station/index.js'
 import type { TestableOCPP16IncomingRequestService } from '../../../../src/charging-station/ocpp/1.6/__testable__/index.js'
 import type { OCPP16ResponseService } from '../../../../src/charging-station/ocpp/1.6/OCPP16ResponseService.js'
-import type {
-  RemoteStartTransactionRequest,
-  RemoteStopTransactionRequest,
-} from '../../../../src/types/ocpp/1.6/Requests.js'
 import type {
   OCPP16StartTransactionRequest,
   OCPP16StartTransactionResponse,
   OCPP16StopTransactionRequest,
   OCPP16StopTransactionResponse,
-} from '../../../../src/types/ocpp/1.6/Transaction.js'
+  RemoteStartTransactionRequest,
+  RemoteStopTransactionRequest,
+} from '../../../../src/types/index.js'
 
 import { createTestableIncomingRequestService } from '../../../../src/charging-station/ocpp/1.6/__testable__/index.js'
 import { OCPP16IncomingRequestService } from '../../../../src/charging-station/ocpp/1.6/OCPP16IncomingRequestService.js'
 import { OCPP16ResponseService as OCPP16ResponseServiceClass } from '../../../../src/charging-station/ocpp/1.6/OCPP16ResponseService.js'
+import { OCPP16ServiceUtils } from '../../../../src/charging-station/ocpp/1.6/OCPP16ServiceUtils.js'
 import {
   AvailabilityType,
   GenericStatus,
+  OCPP16AuthorizationStatus,
   OCPP16ChargePointStatus,
   OCPP16MeterValueUnit,
+  OCPP16RequestCommand,
   OCPPVersion,
 } from '../../../../src/types/index.js'
-import { OCPP16RequestCommand } from '../../../../src/types/ocpp/1.6/Requests.js'
-import { OCPP16AuthorizationStatus } from '../../../../src/types/ocpp/1.6/Transaction.js'
 import { Constants } from '../../../../src/utils/index.js'
 import {
   setupConnectorWithTransaction,
   standardCleanup,
 } from '../../../helpers/TestLifecycleHelpers.js'
-import { TEST_CHARGING_STATION_BASE_NAME } from '../../ChargingStationTestConstants.js'
-import { createMockChargingStation } from '../../ChargingStationTestUtils.js'
+import { TEST_CHARGING_STATION_BASE_NAME, TEST_ID_TAG } from '../../ChargingStationTestConstants.js'
+import { createMockChargingStation } from '../../helpers/StationHelpers.js'
 
 /**
  * Creates a shared station configured for cross-service integration tests,
@@ -56,15 +55,14 @@ function createIntegrationContext (): {
   const { station } = createMockChargingStation({
     baseName: TEST_CHARGING_STATION_BASE_NAME,
     connectorsCount: 2,
-    heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
     ocppRequestService: {
-      requestHandler: () => Promise.resolve({}),
+      requestHandler: async () => Promise.resolve({}),
     },
     stationInfo: {
       ocppStrictCompliance: false,
       ocppVersion: OCPPVersion.VERSION_16,
     },
-    websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+    websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
   })
 
   // IncomingRequest service (handles RemoteStart/Stop from CSMS)
@@ -75,20 +73,26 @@ function createIntegrationContext (): {
   const responseService = new OCPP16ResponseServiceClass()
 
   // Mock meter value start/stop to avoid real timer setup
-  station.startMeterValues = (_connectorId: number, _interval: number) => {
-    /* noop */
-  }
-  station.stopMeterValues = (_connectorId: number) => {
-    /* noop */
-  }
+  mock.method(
+    OCPP16ServiceUtils,
+    'startUpdatedMeterValues',
+    (_station: unknown, _connectorId: number, _interval: number) => {
+      /* noop */
+    }
+  )
+  mock.method(
+    OCPP16ServiceUtils,
+    'stopUpdatedMeterValues',
+    (_station: unknown, _connectorId: number) => {
+      /* noop */
+    }
+  )
 
   // Add MeterValues template required by buildTransactionBeginMeterValue
-  for (const [connectorId] of station.connectors) {
-    if (connectorId > 0) {
-      const connector = station.getConnectorStatus(connectorId)
-      if (connector != null) {
-        connector.MeterValues = [{ unit: OCPP16MeterValueUnit.WATT_HOUR, value: '0' }]
-      }
+  for (const { connectorId } of station.iterateConnectors(true)) {
+    const connectorStatus = station.getConnectorStatus(connectorId)
+    if (connectorStatus != null) {
+      connectorStatus.MeterValues = [{ unit: OCPP16MeterValueUnit.WATT_HOUR, value: '0' }]
     }
   }
 
@@ -116,7 +120,7 @@ await describe('OCPP16 Integration — Transaction Lifecycle', async () => {
   await it('should complete full transaction lifecycle: RemoteStart → StartTransaction accepted → StopTransaction', async () => {
     const connectorId = 1
     const transactionId = 42
-    const idTag = 'TEST-TAG-001'
+    const idTag = TEST_ID_TAG
 
     // Step 1: RemoteStartTransaction — CSMS asks station to start charging
     const remoteStartRequest: RemoteStartTransactionRequest = {
@@ -235,7 +239,7 @@ await describe('OCPP16 Integration — Transaction Lifecycle', async () => {
     // Act
     const request: RemoteStartTransactionRequest = {
       connectorId,
-      idTag: 'TEST-TAG-001',
+      idTag: TEST_ID_TAG,
     }
     const response = await testableService.handleRequestRemoteStartTransaction(station, request)
 
@@ -274,12 +278,12 @@ await describe('OCPP16 Integration — Transaction Lifecycle', async () => {
     )
 
     // Assert: connector should be reset, no active transaction
-    const connector = station.getConnectorStatus(connectorId)
-    if (connector == null) {
+    const connectorStatus = station.getConnectorStatus(connectorId)
+    if (connectorStatus == null) {
       assert.fail('Expected connector to be defined')
     }
-    assert.strictEqual(connector.transactionStarted, false)
-    assert.strictEqual(connector.transactionId, undefined)
+    assert.strictEqual(connectorStatus.transactionStarted, false)
+    assert.strictEqual(connectorStatus.transactionId, undefined)
   })
 
   // ─── State consistency ───────────────────────────────────────────────

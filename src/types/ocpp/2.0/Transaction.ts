@@ -2,7 +2,6 @@ import type { JsonObject } from '../../JsonType.js'
 import type { UUIDv4 } from '../../UUID.js'
 import type { CustomDataType } from './Common.js'
 import type { OCPP20MeterValue } from './MeterValues.js'
-import type { OCPP20IncomingRequestCommand } from './Requests.js'
 
 export enum CostKindEnumType {
   CarbonDioxideEmission = 'CarbonDioxideEmission',
@@ -269,83 +268,26 @@ export interface OCPP20MessageContentType extends JsonObject {
 }
 
 /**
- * Context information for intelligent TriggerReason selection
- * Used by OCPP20ServiceUtils.selectTriggerReason() to determine appropriate trigger reason
- */
-export interface OCPP20TransactionContext {
-  /** Abnormal condition type (for abnormal_condition source) */
-  abnormalCondition?: string
-
-  /** Authorization method used (for local_authorization source) */
-  authorizationMethod?: 'groupIdToken' | 'idToken' | 'stopAuthorized'
-
-  /** Cable connection state (for cable_action source) */
-  cableState?: 'detected' | 'plugged_in' | 'unplugged'
-
-  /** Charging state change details (for charging_state source) */
-  chargingStateChange?: {
-    from?: OCPP20ChargingStateEnumType
-    to?: OCPP20ChargingStateEnumType
-  }
-
-  /** Specific command that triggered the event (for remote_command source) */
-  command?: OCPP20IncomingRequestCommand
-
-  hasRemoteStartId?: boolean
-
-  isDeauthorized?: boolean
-
-  /** Additional context flags */
-  isOffline?: boolean
-
-  /** Whether this is a periodic meter value event */
-  isPeriodicMeterValue?: boolean
-
-  /** Whether this is a signed data reception event */
-  isSignedDataReceived?: boolean
-  /** Source of the transaction event - command, authorization, physical action, etc. */
-  source:
-    | 'abnormal_condition'
-    | 'cable_action'
-    | 'charging_state'
-    | 'energy_limit'
-    | 'external_limit'
-    | 'local_authorization'
-    | 'meter_value'
-    | 'remote_command'
-    | 'system_event'
-    | 'time_limit'
-  /** System event details (for system_event source) */
-  systemEvent?: 'ev_communication_lost' | 'ev_connect_timeout' | 'ev_departed' | 'ev_detected'
-}
-
-/**
  * Optional parameters for building and sending TransactionEvent requests.
  * Aligned with OCPP 2.0.1 TransactionEvent.req optional fields.
  */
 export interface OCPP20TransactionEventOptions {
-  /** Maximum current the cable can handle (A) */
   cableMaxCurrent?: number
-  /** Current charging state per OCPP 2.0.1 ChargingStateEnumType */
   chargingState?: OCPP20ChargingStateEnumType
-  /** Vendor-specific custom data */
+  connectorId?: number
   customData?: CustomDataType
-  /** EVSE identifier (1-based) */
+  eventType: OCPP20TransactionEventEnumType
+  evse?: Partial<OCPP20EVSEType>
   evseId?: number
-  /** Token used for authorization */
   idToken?: OCPP20IdTokenType
-  /** Meter values associated with this event */
   meterValue?: OCPP20MeterValue[]
-  /** Number of phases used for charging */
   numberOfPhasesUsed?: number
-  /** Whether event occurred while offline */
   offline?: boolean
-  /** Remote start transaction ID */
   remoteStartId?: number
-  /** Reservation ID if applicable */
   reservationId?: number
-  /** Reason for stopping transaction */
   stoppedReason?: OCPP20ReasonEnumType
+  transactionId?: string
+  triggerReason?: OCPP20TriggerReasonEnumType
 }
 
 export interface OCPP20TransactionEventRequest extends JsonObject {

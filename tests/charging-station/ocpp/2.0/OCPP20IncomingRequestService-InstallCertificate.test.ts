@@ -21,7 +21,7 @@ import {
 import { Constants } from '../../../../src/utils/index.js'
 import { standardCleanup } from '../../../helpers/TestLifecycleHelpers.js'
 import { TEST_CHARGING_STATION_BASE_NAME } from '../../ChargingStationTestConstants.js'
-import { createMockChargingStation } from '../../ChargingStationTestUtils.js'
+import { createMockChargingStation } from '../../helpers/StationHelpers.js'
 import {
   EXPIRED_PEM_CERTIFICATE,
   INVALID_PEM_CERTIFICATE_MISSING_MARKERS,
@@ -47,12 +47,11 @@ await describe('I03 - InstallCertificate', async () => {
       baseName: TEST_CHARGING_STATION_BASE_NAME,
       connectorsCount: 3,
       evseConfiguration: { evsesCount: 3 },
-      heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
       stationInfo: {
         ocppStrictCompliance: false,
         ocppVersion: OCPPVersion.VERSION_201,
       },
-      websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+      websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
     })
     mockStation = initialStation
 
@@ -258,8 +257,11 @@ await describe('I03 - InstallCertificate', async () => {
         assert.fail('Expected statusInfo to be defined')
       }
       assert.strictEqual(typeof response.statusInfo.reasonCode, 'string')
-      assert.ok(response.statusInfo.reasonCode.length > 0)
-      assert.ok(response.statusInfo.reasonCode.length <= 20)
+      assert.ok(response.statusInfo.reasonCode.length > 0, 'reasonCode should not be empty')
+      assert.ok(
+        response.statusInfo.reasonCode.length <= 20,
+        'reasonCode length should be at most 20 characters'
+      )
     })
   })
 })

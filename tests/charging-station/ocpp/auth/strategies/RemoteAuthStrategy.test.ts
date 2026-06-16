@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, it } from 'node:test'
 
 import type {
   AuthCache,
-  LocalAuthEntry,
   LocalAuthListManager,
   OCPPAuthAdapter,
 } from '../../../../../src/charging-station/ocpp/auth/interfaces/OCPPAuthService.js'
@@ -19,8 +18,9 @@ import {
   AuthorizationStatus,
   IdentifierType,
 } from '../../../../../src/charging-station/ocpp/auth/types/AuthTypes.js'
-import { OCPPVersion } from '../../../../../src/types/ocpp/OCPPVersion.js'
+import { OCPPVersion } from '../../../../../src/types/index.js'
 import { standardCleanup } from '../../../../helpers/TestLifecycleHelpers.js'
+import { TEST_ID_TAG_INVALID } from '../../../ChargingStationTestConstants.js'
 import {
   createMockAuthCache,
   createMockAuthorizationResult,
@@ -36,19 +36,13 @@ await describe('RemoteAuthStrategy', async () => {
   let mockAuthCache: AuthCache
   let mockLocalAuthListManager: LocalAuthListManager
   let mockOCPP16Adapter: OCPPAuthAdapter
-  let mockOCPP20Adapter: OCPPAuthAdapter
 
   beforeEach(() => {
     mockAuthCache = createMockAuthCache()
     mockLocalAuthListManager = createMockLocalAuthListManager()
     mockOCPP16Adapter = createMockOCPPAdapter(OCPPVersion.VERSION_16)
-    mockOCPP20Adapter = createMockOCPPAdapter(OCPPVersion.VERSION_20)
 
-    const adapters = new Map<OCPPVersion, OCPPAuthAdapter>()
-    adapters.set(OCPPVersion.VERSION_16, mockOCPP16Adapter)
-    adapters.set(OCPPVersion.VERSION_20, mockOCPP20Adapter)
-
-    strategy = new RemoteAuthStrategy(adapters, mockAuthCache, mockLocalAuthListManager)
+    strategy = new RemoteAuthStrategy(mockOCPP16Adapter, mockAuthCache, mockLocalAuthListManager)
   })
 
   afterEach(() => {
@@ -69,16 +63,15 @@ await describe('RemoteAuthStrategy', async () => {
   })
 
   await describe('initialize', async () => {
-    await it('should initialize successfully with adapters', () => {
+    await it('should initialize successfully with adapter', () => {
       const config = createTestAuthConfig({ authorizationCacheEnabled: true })
       assert.doesNotThrow(() => {
         strategy.initialize(config)
       })
     })
 
-    await it('should validate adapter configurations', () => {
+    await it('should validate adapter configuration', () => {
       mockOCPP16Adapter.validateConfiguration = () => true
-      mockOCPP20Adapter.validateConfiguration = () => true
       const config = createTestAuthConfig()
       assert.doesNotThrow(() => {
         strategy.initialize(config)
@@ -90,11 +83,7 @@ await describe('RemoteAuthStrategy', async () => {
     await it('should return true when remote auth is enabled', () => {
       const config = createTestAuthConfig()
       const request = createMockAuthRequest({
-        identifier: createMockIdentifier(
-          OCPPVersion.VERSION_16,
-          'REMOTE_TAG',
-          IdentifierType.ID_TAG
-        ),
+        identifier: createMockIdentifier('REMOTE_TAG', IdentifierType.ID_TAG),
       })
       assert.strictEqual(strategy.canHandle(request, config), true)
     })
@@ -104,11 +93,7 @@ await describe('RemoteAuthStrategy', async () => {
         remoteAuthorization: false,
       })
       const request = createMockAuthRequest({
-        identifier: createMockIdentifier(
-          OCPPVersion.VERSION_16,
-          'REMOTE_TAG',
-          IdentifierType.ID_TAG
-        ),
+        identifier: createMockIdentifier('REMOTE_TAG', IdentifierType.ID_TAG),
       })
       assert.strictEqual(strategy.canHandle(request, config), false)
     })
@@ -117,11 +102,7 @@ await describe('RemoteAuthStrategy', async () => {
       const strategyNoAdapters = new RemoteAuthStrategy()
       const config = createTestAuthConfig()
       const request = createMockAuthRequest({
-        identifier: createMockIdentifier(
-          OCPPVersion.VERSION_16,
-          'REMOTE_TAG',
-          IdentifierType.ID_TAG
-        ),
+        identifier: createMockIdentifier('REMOTE_TAG', IdentifierType.ID_TAG),
       })
       assert.strictEqual(strategyNoAdapters.canHandle(request, config), false)
     })
@@ -133,31 +114,10 @@ await describe('RemoteAuthStrategy', async () => {
       strategy.initialize(config)
     })
 
-    await it('should authenticate using OCPP 1.6 adapter', async () => {
+    await it('should authenticate using adapter', async () => {
       const config = createTestAuthConfig({ authorizationCacheEnabled: true })
       const request = createMockAuthRequest({
-        identifier: createMockIdentifier(
-          OCPPVersion.VERSION_16,
-          'REMOTE_TAG',
-          IdentifierType.ID_TAG
-        ),
-      })
-
-      const result = await strategy.authenticate(request, config)
-
-      assert.notStrictEqual(result, undefined)
-      assert.strictEqual(result?.status, AuthorizationStatus.ACCEPTED)
-      assert.strictEqual(result.method, AuthenticationMethod.REMOTE_AUTHORIZATION)
-    })
-
-    await it('should authenticate using OCPP 2.0 adapter', async () => {
-      const config = createTestAuthConfig({ authorizationCacheEnabled: true })
-      const request = createMockAuthRequest({
-        identifier: {
-          ocppVersion: OCPPVersion.VERSION_20,
-          type: IdentifierType.ID_TAG,
-          value: 'REMOTE_TAG_20',
-        },
+        identifier: createMockIdentifier('REMOTE_TAG', IdentifierType.ID_TAG),
       })
 
       const result = await strategy.authenticate(request, config)
@@ -169,8 +129,12 @@ await describe('RemoteAuthStrategy', async () => {
 
     await it('should cache successful authorization results', async () => {
       let cachedKey: string | undefined
-      mockAuthCache.set = (key: string) => {
+      let cachedValue: AuthorizationResult | undefined
+      let cachedTtl: number | undefined
+      mockAuthCache.set = (key: string, value: AuthorizationResult, ttl?: number) => {
         cachedKey = key
+        cachedValue = value
+        cachedTtl = ttl
       }
 
       const config = createTestAuthConfig({
@@ -178,21 +142,23 @@ await describe('RemoteAuthStrategy', async () => {
         authorizationCacheLifetime: 300,
       })
       const request = createMockAuthRequest({
-        identifier: createMockIdentifier(
-          OCPPVersion.VERSION_16,
-          'CACHE_TAG',
-          IdentifierType.ID_TAG
-        ),
+        identifier: createMockIdentifier('CACHE_TAG', IdentifierType.ID_TAG),
       })
 
       await strategy.authenticate(request, config)
       assert.strictEqual(cachedKey, 'CACHE_TAG')
+      assert.strictEqual(cachedValue?.status, AuthorizationStatus.ACCEPTED)
+      assert.strictEqual(cachedTtl, 300)
     })
 
-    await it('G03.FR.01.T4.01 - should cache BLOCKED authorization status', async () => {
+    await it('C10.FR.01.T01 - should cache BLOCKED authorization status', async () => {
       let cachedKey: string | undefined
-      mockAuthCache.set = (key: string) => {
+      let cachedValue: AuthorizationResult | undefined
+      let cachedTtl: number | undefined
+      mockAuthCache.set = (key: string, value: AuthorizationResult, ttl?: number) => {
         cachedKey = key
+        cachedValue = value
+        cachedTtl = ttl
       }
       mockOCPP16Adapter.authorizeRemote = () =>
         new Promise<AuthorizationResult>(resolve => {
@@ -209,21 +175,23 @@ await describe('RemoteAuthStrategy', async () => {
         authorizationCacheLifetime: 300,
       })
       const request = createMockAuthRequest({
-        identifier: createMockIdentifier(
-          OCPPVersion.VERSION_16,
-          'BLOCKED_TAG',
-          IdentifierType.ID_TAG
-        ),
+        identifier: createMockIdentifier('BLOCKED_TAG', IdentifierType.ID_TAG),
       })
 
       await strategy.authenticate(request, config)
       assert.strictEqual(cachedKey, 'BLOCKED_TAG')
+      assert.strictEqual(cachedValue?.status, AuthorizationStatus.BLOCKED)
+      assert.strictEqual(cachedTtl, 300)
     })
 
-    await it('G03.FR.01.T4.02 - should cache EXPIRED authorization status', async () => {
+    await it('C10.FR.01.T02 - should cache EXPIRED authorization status', async () => {
       let cachedKey: string | undefined
-      mockAuthCache.set = (key: string) => {
+      let cachedValue: AuthorizationResult | undefined
+      let cachedTtl: number | undefined
+      mockAuthCache.set = (key: string, value: AuthorizationResult, ttl?: number) => {
         cachedKey = key
+        cachedValue = value
+        cachedTtl = ttl
       }
       mockOCPP16Adapter.authorizeRemote = () =>
         new Promise<AuthorizationResult>(resolve => {
@@ -240,21 +208,23 @@ await describe('RemoteAuthStrategy', async () => {
         authorizationCacheLifetime: 300,
       })
       const request = createMockAuthRequest({
-        identifier: createMockIdentifier(
-          OCPPVersion.VERSION_16,
-          'EXPIRED_TAG',
-          IdentifierType.ID_TAG
-        ),
+        identifier: createMockIdentifier('EXPIRED_TAG', IdentifierType.ID_TAG),
       })
 
       await strategy.authenticate(request, config)
       assert.strictEqual(cachedKey, 'EXPIRED_TAG')
+      assert.strictEqual(cachedValue?.status, AuthorizationStatus.EXPIRED)
+      assert.strictEqual(cachedTtl, 300)
     })
 
-    await it('G03.FR.01.T4.03 - should cache INVALID authorization status', async () => {
+    await it('C10.FR.01.T03 - should cache INVALID authorization status', async () => {
       let cachedKey: string | undefined
-      mockAuthCache.set = (key: string) => {
+      let cachedValue: AuthorizationResult | undefined
+      let cachedTtl: number | undefined
+      mockAuthCache.set = (key: string, value: AuthorizationResult, ttl?: number) => {
         cachedKey = key
+        cachedValue = value
+        cachedTtl = ttl
       }
       mockOCPP16Adapter.authorizeRemote = () =>
         new Promise<AuthorizationResult>(resolve => {
@@ -271,21 +241,23 @@ await describe('RemoteAuthStrategy', async () => {
         authorizationCacheLifetime: 300,
       })
       const request = createMockAuthRequest({
-        identifier: createMockIdentifier(
-          OCPPVersion.VERSION_16,
-          'INVALID_TAG',
-          IdentifierType.ID_TAG
-        ),
+        identifier: createMockIdentifier(TEST_ID_TAG_INVALID, IdentifierType.ID_TAG),
       })
 
       await strategy.authenticate(request, config)
-      assert.strictEqual(cachedKey, 'INVALID_TAG')
+      assert.strictEqual(cachedKey, TEST_ID_TAG_INVALID)
+      assert.strictEqual(cachedValue?.status, AuthorizationStatus.INVALID)
+      assert.strictEqual(cachedTtl, 300)
     })
 
-    await it('G03.FR.01.T4.04 - should still cache ACCEPTED authorization status (regression)', async () => {
+    await it('C10.FR.01.T04 - should still cache ACCEPTED authorization status (regression)', async () => {
       let cachedKey: string | undefined
-      mockAuthCache.set = (key: string) => {
+      let cachedValue: AuthorizationResult | undefined
+      let cachedTtl: number | undefined
+      mockAuthCache.set = (key: string, value: AuthorizationResult, ttl?: number) => {
         cachedKey = key
+        cachedValue = value
+        cachedTtl = ttl
       }
 
       const config = createTestAuthConfig({
@@ -293,15 +265,13 @@ await describe('RemoteAuthStrategy', async () => {
         authorizationCacheLifetime: 300,
       })
       const request = createMockAuthRequest({
-        identifier: createMockIdentifier(
-          OCPPVersion.VERSION_16,
-          'ACCEPTED_TAG',
-          IdentifierType.ID_TAG
-        ),
+        identifier: createMockIdentifier('ACCEPTED_TAG', IdentifierType.ID_TAG),
       })
 
       await strategy.authenticate(request, config)
       assert.strictEqual(cachedKey, 'ACCEPTED_TAG')
+      assert.strictEqual(cachedValue?.status, AuthorizationStatus.ACCEPTED)
+      assert.strictEqual(cachedTtl, 300)
     })
 
     await it('should return undefined when remote is unavailable', async () => {
@@ -309,11 +279,7 @@ await describe('RemoteAuthStrategy', async () => {
 
       const config = createTestAuthConfig()
       const request = createMockAuthRequest({
-        identifier: createMockIdentifier(
-          OCPPVersion.VERSION_16,
-          'UNAVAILABLE_TAG',
-          IdentifierType.ID_TAG
-        ),
+        identifier: createMockIdentifier('UNAVAILABLE_TAG', IdentifierType.ID_TAG),
       })
 
       const result = await strategy.authenticate(request, config)
@@ -321,16 +287,18 @@ await describe('RemoteAuthStrategy', async () => {
     })
 
     await it('should return undefined when no adapter available', async () => {
+      const strategyNoAdapter = new RemoteAuthStrategy(undefined, mockAuthCache)
+      strategyNoAdapter.initialize(createTestAuthConfig())
+
       const config = createTestAuthConfig()
       const request = createMockAuthRequest({
         identifier: {
-          ocppVersion: OCPPVersion.VERSION_201,
           type: IdentifierType.ID_TAG,
           value: 'UNKNOWN_VERSION_TAG',
         },
       })
 
-      const result = await strategy.authenticate(request, config)
+      const result = await strategyNoAdapter.authenticate(request, config)
       assert.strictEqual(result, undefined)
     })
 
@@ -341,34 +309,41 @@ await describe('RemoteAuthStrategy', async () => {
 
       const config = createTestAuthConfig()
       const request = createMockAuthRequest({
-        identifier: createMockIdentifier(
-          OCPPVersion.VERSION_16,
-          'ERROR_TAG',
-          IdentifierType.ID_TAG
-        ),
+        identifier: createMockIdentifier('ERROR_TAG', IdentifierType.ID_TAG),
       })
 
       const result = await strategy.authenticate(request, config)
       assert.strictEqual(result, undefined)
     })
 
-    await it('G03.FR.01.T8.01 - should not cache identifier that is in local auth list', async () => {
+    await it('should still return result when cache.set throws', async () => {
+      mockAuthCache.set = () => {
+        throw new Error('Cache storage full')
+      }
+
+      const config = createTestAuthConfig({
+        authorizationCacheEnabled: true,
+        authorizationCacheLifetime: 300,
+      })
+      const request = createMockAuthRequest({
+        identifier: createMockIdentifier('CACHE_ERROR_TAG', IdentifierType.ID_TAG),
+      })
+
+      const result = await strategy.authenticate(request, config)
+      assert.notStrictEqual(result, undefined)
+      assert.strictEqual(result?.status, AuthorizationStatus.ACCEPTED)
+    })
+
+    await it('C13.FR.01.T01 - should not cache identifier that is in local auth list', async () => {
       let cachedKey: string | undefined
       mockAuthCache.set = (key: string) => {
         cachedKey = key
       }
 
       mockLocalAuthListManager.getEntry = (identifier: string) =>
-        new Promise<LocalAuthEntry | undefined>(resolve => {
-          if (identifier === 'LOCAL_AUTH_TAG') {
-            resolve({
-              identifier: 'LOCAL_AUTH_TAG',
-              status: 'Active',
-            })
-          } else {
-            resolve(undefined)
-          }
-        })
+        identifier === 'LOCAL_AUTH_TAG'
+          ? { identifier: 'LOCAL_AUTH_TAG', status: 'Active' }
+          : undefined
 
       const config = createTestAuthConfig({
         authorizationCacheEnabled: true,
@@ -376,27 +351,20 @@ await describe('RemoteAuthStrategy', async () => {
         localAuthListEnabled: true,
       })
       const request = createMockAuthRequest({
-        identifier: createMockIdentifier(
-          OCPPVersion.VERSION_16,
-          'LOCAL_AUTH_TAG',
-          IdentifierType.ID_TAG
-        ),
+        identifier: createMockIdentifier('LOCAL_AUTH_TAG', IdentifierType.ID_TAG),
       })
 
       await strategy.authenticate(request, config)
       assert.strictEqual(cachedKey, undefined)
     })
 
-    await it('G03.FR.01.T8.02 - should cache identifier that is not in local auth list', async () => {
+    await it('C10.FR.01.T05 - should cache identifier that is not in local auth list', async () => {
       let cachedKey: string | undefined
       mockAuthCache.set = (key: string) => {
         cachedKey = key
       }
 
-      mockLocalAuthListManager.getEntry = () =>
-        new Promise<LocalAuthEntry | undefined>(resolve => {
-          resolve(undefined)
-        })
+      mockLocalAuthListManager.getEntry = () => undefined
 
       const config = createTestAuthConfig({
         authorizationCacheEnabled: true,
@@ -404,37 +372,56 @@ await describe('RemoteAuthStrategy', async () => {
         localAuthListEnabled: true,
       })
       const request = createMockAuthRequest({
-        identifier: createMockIdentifier(
-          OCPPVersion.VERSION_16,
-          'REMOTE_AUTH_TAG',
-          IdentifierType.ID_TAG
-        ),
+        identifier: createMockIdentifier('REMOTE_AUTH_TAG', IdentifierType.ID_TAG),
       })
 
       await strategy.authenticate(request, config)
       assert.strictEqual(cachedKey, 'REMOTE_AUTH_TAG')
     })
+
+    await it('should cache result when getEntry throws', async () => {
+      let cachedKey: string | undefined
+      mockAuthCache.set = (key: string) => {
+        cachedKey = key
+      }
+
+      mockLocalAuthListManager.getEntry = () => {
+        throw new Error('Local list lookup failed')
+      }
+
+      const config = createTestAuthConfig({
+        authorizationCacheEnabled: true,
+        authorizationCacheLifetime: 300,
+        localAuthListEnabled: true,
+      })
+      const request = createMockAuthRequest({
+        identifier: createMockIdentifier('FAILING_TAG', IdentifierType.ID_TAG),
+      })
+
+      await strategy.authenticate(request, config)
+      assert.strictEqual(cachedKey, 'FAILING_TAG')
+    })
   })
 
   await describe('adapter management', async () => {
-    await it('should add adapter dynamically', () => {
+    await it('should set adapter dynamically', () => {
       const newStrategy = new RemoteAuthStrategy()
-      newStrategy.addAdapter(OCPPVersion.VERSION_16, mockOCPP16Adapter)
+      newStrategy.setAdapter(mockOCPP16Adapter)
 
       const config = createTestAuthConfig()
       const request = createMockAuthRequest({
-        identifier: createMockIdentifier(OCPPVersion.VERSION_16, 'TEST', IdentifierType.ID_TAG),
+        identifier: createMockIdentifier('TEST', IdentifierType.ID_TAG),
       })
 
       assert.strictEqual(newStrategy.canHandle(request, config), true)
     })
 
-    await it('should remove adapter', () => {
-      void strategy.removeAdapter(OCPPVersion.VERSION_16)
+    await it('should clear adapter', () => {
+      strategy.clearAdapter()
 
       const config = createTestAuthConfig()
       const request = createMockAuthRequest({
-        identifier: createMockIdentifier(OCPPVersion.VERSION_16, 'TEST', IdentifierType.ID_TAG),
+        identifier: createMockIdentifier('TEST', IdentifierType.ID_TAG),
       })
 
       assert.strictEqual(strategy.canHandle(request, config), false)
@@ -442,32 +429,31 @@ await describe('RemoteAuthStrategy', async () => {
   })
 
   await describe('testConnectivity', async () => {
-    await it('should test connectivity successfully', async () => {
+    await it('should test connectivity successfully', () => {
       strategy.initialize(createTestAuthConfig())
-      const result = await strategy.testConnectivity()
+      const result = strategy.testConnectivity()
       assert.strictEqual(result, true)
     })
 
-    await it('should return false when not initialized', async () => {
+    await it('should return false when not initialized', () => {
       const newStrategy = new RemoteAuthStrategy()
-      const result = await newStrategy.testConnectivity()
+      const result = newStrategy.testConnectivity()
       assert.strictEqual(result, false)
     })
 
-    await it('should return false when all adapters unavailable', async () => {
+    await it('should return false when adapter unavailable', () => {
       mockOCPP16Adapter.isRemoteAvailable = () => false
-      mockOCPP20Adapter.isRemoteAvailable = () => false
 
       strategy.initialize(createTestAuthConfig())
-      const result = await strategy.testConnectivity()
+      const result = strategy.testConnectivity()
       assert.strictEqual(result, false)
     })
   })
 
   await describe('getStats', async () => {
-    await it('should return strategy statistics', async () => {
-      const stats = await strategy.getStats()
-      assert.strictEqual(stats.adapterCount, 2)
+    await it('should return strategy statistics', () => {
+      const stats = strategy.getStats()
+      assert.strictEqual(stats.hasAdapter, true)
       assert.strictEqual(stats.failedRemoteAuth, 0)
       assert.strictEqual(stats.hasAuthCache, true)
       assert.strictEqual(stats.isInitialized, false)
@@ -475,17 +461,46 @@ await describe('RemoteAuthStrategy', async () => {
       assert.strictEqual(stats.totalRequests, 0)
     })
 
-    await it('should include adapter statistics', async () => {
+    await it('should include adapter statistics', () => {
       strategy.initialize(createTestAuthConfig())
-      const stats = await strategy.getStats()
-      assert.notStrictEqual(stats.adapterStats, undefined)
+      const stats = strategy.getStats()
+      assert.strictEqual(typeof stats.adapterAvailable, 'boolean')
+    })
+
+    await it('should update statistics after successful and failed authentications', async () => {
+      strategy.initialize(createTestAuthConfig())
+
+      // Successful auth
+      const successRequest = createMockAuthRequest({
+        identifier: createMockIdentifier('SUCCESS_TAG', IdentifierType.ID_TAG),
+      })
+      await strategy.authenticate(successRequest, createTestAuthConfig())
+
+      const statsAfterSuccess = strategy.getStats()
+      assert.strictEqual(statsAfterSuccess.totalRequests, 1)
+      assert.strictEqual(statsAfterSuccess.successfulRemoteAuth, 1)
+      assert.strictEqual(statsAfterSuccess.failedRemoteAuth, 0)
+
+      // Failed auth (adapter throws)
+      mockOCPP16Adapter.authorizeRemote = () => {
+        throw new Error('Network error')
+      }
+      const failRequest = createMockAuthRequest({
+        identifier: createMockIdentifier('FAIL_TAG', IdentifierType.ID_TAG),
+      })
+      await strategy.authenticate(failRequest, createTestAuthConfig())
+
+      const statsAfterFailure = strategy.getStats()
+      assert.strictEqual(statsAfterFailure.totalRequests, 2)
+      assert.strictEqual(statsAfterFailure.successfulRemoteAuth, 1)
+      assert.strictEqual(statsAfterFailure.failedRemoteAuth, 1)
     })
   })
 
   await describe('cleanup', async () => {
-    await it('should reset strategy state', async () => {
+    await it('should reset strategy state', () => {
       strategy.cleanup()
-      const stats = await strategy.getStats()
+      const stats = strategy.getStats()
       assert.strictEqual(stats.isInitialized, false)
       assert.strictEqual(stats.totalRequests, 0)
     })

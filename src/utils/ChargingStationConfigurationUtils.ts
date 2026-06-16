@@ -1,10 +1,21 @@
 import type { ChargingStation } from '../charging-station/index.js'
 import type {
+  ATGEntry,
   ChargingStationAutomaticTransactionGeneratorConfiguration,
+  ConnectorEntry,
   ConnectorStatus,
+  EvseEntry,
   EvseStatusConfiguration,
-  EvseStatusWorkerType,
 } from '../types/index.js'
+
+export const buildATGEntries = (chargingStation: ChargingStation): ATGEntry[] => {
+  if (chargingStation.automaticTransactionGenerator?.connectorsStatus == null) {
+    return []
+  }
+  return [...chargingStation.automaticTransactionGenerator.connectorsStatus.entries()].map(
+    ([connectorId, status]) => ({ connectorId, status })
+  )
+}
 
 export const buildChargingStationAutomaticTransactionGeneratorConfiguration = (
   chargingStation: ChargingStation
@@ -19,51 +30,106 @@ export const buildChargingStationAutomaticTransactionGeneratorConfiguration = (
   }
 }
 
-export const buildConnectorsStatus = (chargingStation: ChargingStation): ConnectorStatus[] => {
-  return [...chargingStation.connectors.values()].map(
-    ({
-      transactionEventQueue,
-      transactionSetInterval,
-      transactionTxUpdatedSetInterval,
-      ...connectorStatus
-    }) => connectorStatus
-  )
+export const buildConnectorEntries = (chargingStation: ChargingStation): ConnectorEntry[] => {
+  if (chargingStation.hasEvses) {
+    return []
+  }
+  return chargingStation
+    .iterateConnectors()
+    .map(
+      ({
+        connectorId,
+        connectorStatus: {
+          transactionEndedMeterValues,
+          transactionEndedMeterValuesSetInterval,
+          transactionEventQueue,
+          transactionUpdatedMeterValuesSetInterval,
+          ...connectorStatus
+        },
+      }) => ({
+        connectorId,
+        connectorStatus,
+        evseId: undefined,
+      })
+    )
+    .toArray()
 }
 
-export enum OutputFormat {
-  configuration = 'configuration',
-  worker = 'worker',
+export const buildConnectorsStatus = (
+  chargingStation: ChargingStation
+): [number, ConnectorStatus][] => {
+  if (chargingStation.hasEvses) {
+    return []
+  }
+  return chargingStation
+    .iterateConnectors()
+    .map(
+      ({
+        connectorId,
+        connectorStatus: {
+          transactionEndedMeterValues,
+          transactionEndedMeterValuesSetInterval,
+          transactionEventQueue,
+          transactionUpdatedMeterValuesSetInterval,
+          ...connectorStatus
+        },
+      }) => [connectorId, connectorStatus] as [number, ConnectorStatus]
+    )
+    .toArray()
+}
+
+export const buildEvseEntries = (chargingStation: ChargingStation): EvseEntry[] => {
+  return chargingStation
+    .iterateEvses()
+    .map(({ evseId, evseStatus }) => ({
+      evseId,
+      evseStatus: {
+        availability: evseStatus.availability,
+        connectors: [...evseStatus.connectors.entries()].map(
+          ([
+            connectorId,
+            {
+              transactionEndedMeterValues,
+              transactionEndedMeterValuesSetInterval,
+              transactionEventQueue,
+              transactionUpdatedMeterValuesSetInterval,
+              ...connectorStatus
+            },
+          ]) => ({ connectorId, connectorStatus, evseId })
+        ),
+      },
+    }))
+    .toArray() as unknown as EvseEntry[]
 }
 
 export const buildEvsesStatus = (
-  chargingStation: ChargingStation,
-  outputFormat: OutputFormat = OutputFormat.configuration
-): (EvseStatusConfiguration | EvseStatusWorkerType)[] => {
-  return [...chargingStation.evses.values()].map(evseStatus => {
-    const connectorsStatus = [...evseStatus.connectors.values()].map(
-      ({
-        transactionEventQueue,
-        transactionSetInterval,
-        transactionTxUpdatedSetInterval,
-        ...connectorStatus
-      }) => connectorStatus
-    )
-    switch (outputFormat) {
-      case OutputFormat.configuration: {
-        const status: EvseStatusConfiguration = {
-          ...evseStatus,
+  chargingStation: ChargingStation
+): [number, EvseStatusConfiguration][] => {
+  return chargingStation
+    .iterateEvses()
+    .map(({ evseId, evseStatus }) => {
+      const connectorsStatus: [number, ConnectorStatus][] = [
+        ...evseStatus.connectors.entries(),
+      ].map(
+        ([
+          connectorId,
+          {
+            transactionEndedMeterValues,
+            transactionEndedMeterValuesSetInterval,
+            transactionEventQueue,
+            transactionUpdatedMeterValuesSetInterval,
+            ...connector
+          },
+        ]) => [connectorId, connector]
+      )
+      const { connectors: _, ...evseStatusRest } = evseStatus
+      return [
+        evseId,
+        {
+          ...evseStatusRest,
           connectorsStatus,
-        }
-        delete (status as EvseStatusWorkerType).connectors
-        return status
-      }
-      case OutputFormat.worker:
-        return {
-          ...evseStatus,
-          connectors: connectorsStatus,
-        }
-      default:
-        throw new RangeError(`Unknown output format: ${outputFormat as string}`)
-    }
-  })
+        },
+      ] as [number, EvseStatusConfiguration]
+    })
+    .toArray()
 }

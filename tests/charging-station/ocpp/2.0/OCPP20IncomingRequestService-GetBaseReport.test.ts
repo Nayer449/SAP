@@ -1,15 +1,16 @@
-import { millisecondsToSeconds } from 'date-fns'
 /**
  * @file Tests for OCPP20IncomingRequestService GetBaseReport
  * @description Unit tests for OCPP 2.0 GetBaseReport command handling (B07)
  */
+import { millisecondsToSeconds } from 'date-fns'
 import assert from 'node:assert/strict'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 
 import type { ChargingStation } from '../../../../src/charging-station/index.js'
 
 import {
   addConfigurationKey,
+  buildConfigKey,
   setConfigurationKeyValue,
 } from '../../../../src/charging-station/ConfigurationKeyUtils.js'
 import { createTestableIncomingRequestService } from '../../../../src/charging-station/ocpp/2.0/__testable__/index.js'
@@ -21,16 +22,19 @@ import {
   OCPP20ComponentName,
   OCPP20DeviceInfoVariableName,
   type OCPP20GetBaseReportRequest,
+  type OCPP20GetBaseReportResponse,
+  OCPP20IncomingRequestCommand,
   OCPP20OptionalVariableName,
   OCPP20RequiredVariableName,
   type OCPP20SetVariableResultType,
   OCPPVersion,
   ReportBaseEnumType,
   type ReportDataType,
+  SetVariableStatusEnumType,
+  StandardParametersKey,
 } from '../../../../src/types/index.js'
-import { StandardParametersKey } from '../../../../src/types/ocpp/Configuration.js'
 import { Constants } from '../../../../src/utils/index.js'
-import { standardCleanup } from '../../../../tests/helpers/TestLifecycleHelpers.js'
+import { flushMicrotasks, standardCleanup } from '../../../helpers/TestLifecycleHelpers.js'
 import {
   TEST_CHARGE_POINT_MODEL,
   TEST_CHARGE_POINT_SERIAL_NUMBER,
@@ -38,7 +42,7 @@ import {
   TEST_CHARGING_STATION_BASE_NAME,
   TEST_FIRMWARE_VERSION,
 } from '../../ChargingStationTestConstants.js'
-import { createMockChargingStation } from '../../ChargingStationTestUtils.js'
+import { createMockChargingStation } from '../../helpers/StationHelpers.js'
 
 await describe('B07 - Get Base Report', async () => {
   let station: ChargingStation
@@ -50,18 +54,17 @@ await describe('B07 - Get Base Report', async () => {
       baseName: TEST_CHARGING_STATION_BASE_NAME,
       connectorsCount: 3,
       evseConfiguration: { evsesCount: 3 },
-      heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
       ocppConfiguration: {
         configurationKey: [
           {
             key: StandardParametersKey.HeartbeatInterval,
             readonly: false,
-            value: millisecondsToSeconds(Constants.DEFAULT_HEARTBEAT_INTERVAL).toString(),
+            value: millisecondsToSeconds(Constants.DEFAULT_HEARTBEAT_INTERVAL_MS).toString(),
           },
           {
             key: StandardParametersKey.MeterValueSampleInterval,
             readonly: false,
-            value: millisecondsToSeconds(Constants.DEFAULT_METER_VALUES_INTERVAL).toString(),
+            value: millisecondsToSeconds(Constants.DEFAULT_METER_VALUES_INTERVAL_MS).toString(),
           },
         ],
       },
@@ -73,7 +76,7 @@ await describe('B07 - Get Base Report', async () => {
         ocppStrictCompliance: false,
         ocppVersion: OCPPVersion.VERSION_201,
       },
-      websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+      websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
     })
     station = mockStation
 
@@ -123,9 +126,9 @@ await describe('B07 - Get Base Report', async () => {
     )
     assert.notStrictEqual(heartbeatEntry, undefined)
     if (heartbeatEntry) {
-      const types =
-        heartbeatEntry.variableAttribute?.map((a: { type?: string; value?: string }) => a.type) ??
-        []
+      const types = heartbeatEntry.variableAttribute.map(
+        (a: { type?: string; value?: string }) => a.type
+      )
       assert.deepStrictEqual(types, [AttributeEnumType.Actual])
     }
     // Boolean variable (AuthorizeRemoteStart) should only include Actual
@@ -136,10 +139,9 @@ await describe('B07 - Get Base Report', async () => {
     )
     assert.notStrictEqual(authorizeRemoteStartEntry, undefined)
     if (authorizeRemoteStartEntry) {
-      const types =
-        authorizeRemoteStartEntry.variableAttribute?.map(
-          (a: { type?: string; value?: string }) => a.type
-        ) ?? []
+      const types = authorizeRemoteStartEntry.variableAttribute.map(
+        (a: { type?: string; value?: string }) => a.type
+      )
       assert.deepStrictEqual(types, [AttributeEnumType.Actual])
     }
   })
@@ -206,7 +208,7 @@ await describe('B07 - Get Base Report', async () => {
     )
 
     assert.ok(Array.isArray(reportData))
-    assert.ok(reportData.length > 0)
+    assert.ok(reportData.length > 0, 'report data should not be empty')
 
     // Check that each report data item has the expected structure
     for (const item of reportData) {
@@ -225,7 +227,7 @@ await describe('B07 - Get Base Report', async () => {
     const reportData = testableService.buildReportData(station, ReportBaseEnumType.FullInventory)
 
     assert.ok(Array.isArray(reportData))
-    assert.ok(reportData.length > 0)
+    assert.ok(reportData.length > 0, 'report data should not be empty')
 
     // Check for station info variables
     const modelVariable = reportData.find(
@@ -235,7 +237,7 @@ await describe('B07 - Get Base Report', async () => {
     )
     assert.notStrictEqual(modelVariable, undefined)
     if (modelVariable) {
-      assert.strictEqual(modelVariable.variableAttribute?.[0]?.value, TEST_CHARGE_POINT_MODEL)
+      assert.strictEqual(modelVariable.variableAttribute[0]?.value, TEST_CHARGE_POINT_MODEL)
     }
 
     const vendorVariable = reportData.find(
@@ -245,7 +247,7 @@ await describe('B07 - Get Base Report', async () => {
     )
     assert.notStrictEqual(vendorVariable, undefined)
     if (vendorVariable) {
-      assert.strictEqual(vendorVariable.variableAttribute?.[0]?.value, TEST_CHARGE_POINT_VENDOR)
+      assert.strictEqual(vendorVariable.variableAttribute[0]?.value, TEST_CHARGE_POINT_VENDOR)
     }
   })
 
@@ -254,7 +256,7 @@ await describe('B07 - Get Base Report', async () => {
     const reportData = testableService.buildReportData(station, ReportBaseEnumType.SummaryInventory)
 
     assert.ok(Array.isArray(reportData))
-    assert.ok(reportData.length > 0)
+    assert.ok(reportData.length > 0, 'report data should not be empty')
 
     // Check for availability state variable
     const availabilityVariable = reportData.find(
@@ -270,8 +272,11 @@ await describe('B07 - Get Base Report', async () => {
 
   // ReportingValueSize truncation test
   await it('should truncate long SequenceList/MemberList values per ReportingValueSize', () => {
-    // Ensure ReportingValueSize is at a small value (default is Constants.OCPP_VALUE_ABSOLUTE_MAX_LENGTH). We will override configuration key if absent.
-    const reportingSizeKey = StandardParametersKey.ReportingValueSize
+    // Ensure ReportingValueSize is at a small value (default is OCPP20Constants.MAX_VARIABLE_VALUE_LENGTH). We will override configuration key if absent.
+    const reportingSizeKey = buildConfigKey(
+      OCPP20ComponentName.DeviceDataCtrlr,
+      StandardParametersKey.ReportingValueSize
+    )
     // Add or lower configuration key to 10 to force truncation
     addConfigurationKey(station, reportingSizeKey, '10', undefined, {
       overwrite: true,
@@ -291,7 +296,7 @@ await describe('B07 - Get Base Report', async () => {
         variable: { name: OCPP20RequiredVariableName.TimeSource },
       },
     ])
-    assert.strictEqual(setResult[0].attributeStatus, 'Accepted')
+    assert.strictEqual(setResult[0].attributeStatus, SetVariableStatusEnumType.Accepted)
 
     // Build report; value should be truncated to length 10
     const reportData = testableService.buildReportData(station, ReportBaseEnumType.FullInventory)
@@ -302,7 +307,7 @@ await describe('B07 - Get Base Report', async () => {
     )
     assert.notStrictEqual(timeSourceEntry, undefined)
     if (timeSourceEntry) {
-      const reportedAttr = timeSourceEntry.variableAttribute?.find(
+      const reportedAttr = timeSourceEntry.variableAttribute.find(
         (a: { type?: string; value?: string }) => a.type === AttributeEnumType.Actual
       )
       assert.notStrictEqual(reportedAttr, undefined)
@@ -317,7 +322,7 @@ await describe('B07 - Get Base Report', async () => {
   await it('should handle GetBaseReport with EVSE structure', () => {
     // Create a station with EVSEs
     const { station: stationWithEvses } = createMockChargingStation({
-      baseName: 'CS-EVSE-001',
+      baseName: TEST_CHARGING_STATION_BASE_NAME,
       connectorsCount: 3,
       evseConfiguration: { evsesCount: 3 },
       stationInfo: {
@@ -334,14 +339,14 @@ await describe('B07 - Get Base Report', async () => {
     )
 
     assert.ok(Array.isArray(reportData))
-    assert.ok(reportData.length > 0)
+    assert.ok(reportData.length > 0, 'report data should not be empty')
 
     // Check if EVSE components are included when EVSEs exist
     const evseComponents = reportData.filter(
       (item: ReportDataType) => item.component.name === (OCPP20ComponentName.EVSE as string)
     )
     if (stationWithEvses.hasEvses) {
-      assert.ok(evseComponents.length > 0)
+      assert.ok(evseComponents.length > 0, 'should include EVSE components')
     }
   })
 
@@ -354,5 +359,90 @@ await describe('B07 - Get Base Report', async () => {
 
     assert.ok(Array.isArray(reportData))
     assert.strictEqual(reportData.length, 0)
+  })
+
+  await describe('GET_BASE_REPORT event listener', async () => {
+    let listenerService: OCPP20IncomingRequestService
+    let sendNotifyMock: ReturnType<typeof mock.fn>
+
+    beforeEach(() => {
+      listenerService = new OCPP20IncomingRequestService()
+      sendNotifyMock = mock.method(
+        listenerService as unknown as {
+          sendNotifyReportRequest: (
+            chargingStation: ChargingStation,
+            request: OCPP20GetBaseReportRequest,
+            response: OCPP20GetBaseReportResponse
+          ) => Promise<void>
+        },
+        'sendNotifyReportRequest',
+        async () => Promise.resolve()
+      )
+    })
+
+    afterEach(() => {
+      standardCleanup()
+    })
+
+    await it('should register GET_BASE_REPORT event listener in constructor', () => {
+      assert.strictEqual(
+        listenerService.listenerCount(OCPP20IncomingRequestCommand.GET_BASE_REPORT),
+        1
+      )
+    })
+
+    await it('should call sendNotifyReportRequest when response is Accepted', () => {
+      const request: OCPP20GetBaseReportRequest = {
+        reportBase: ReportBaseEnumType.FullInventory,
+        requestId: 1,
+      }
+      const response: OCPP20GetBaseReportResponse = {
+        status: GenericDeviceModelStatusEnumType.Accepted,
+      }
+
+      listenerService.emit(OCPP20IncomingRequestCommand.GET_BASE_REPORT, station, request, response)
+
+      assert.strictEqual(sendNotifyMock.mock.callCount(), 1)
+    })
+
+    await it('should NOT call sendNotifyReportRequest when response is NotSupported', () => {
+      const request: OCPP20GetBaseReportRequest = {
+        reportBase: ReportBaseEnumType.FullInventory,
+        requestId: 2,
+      }
+      const response: OCPP20GetBaseReportResponse = {
+        status: GenericDeviceModelStatusEnumType.NotSupported,
+      }
+
+      listenerService.emit(OCPP20IncomingRequestCommand.GET_BASE_REPORT, station, request, response)
+
+      assert.strictEqual(sendNotifyMock.mock.callCount(), 0)
+    })
+
+    await it('should handle sendNotifyReportRequest rejection gracefully', async () => {
+      mock.method(
+        listenerService as unknown as {
+          sendNotifyReportRequest: (
+            chargingStation: ChargingStation,
+            request: OCPP20GetBaseReportRequest,
+            response: OCPP20GetBaseReportResponse
+          ) => Promise<void>
+        },
+        'sendNotifyReportRequest',
+        async () => Promise.reject(new Error('notify report error'))
+      )
+
+      const request: OCPP20GetBaseReportRequest = {
+        reportBase: ReportBaseEnumType.FullInventory,
+        requestId: 3,
+      }
+      const response: OCPP20GetBaseReportResponse = {
+        status: GenericDeviceModelStatusEnumType.Accepted,
+      }
+
+      listenerService.emit(OCPP20IncomingRequestCommand.GET_BASE_REPORT, station, request, response)
+
+      await flushMicrotasks()
+    })
   })
 })

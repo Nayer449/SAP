@@ -1,21 +1,30 @@
 import type { ChargingStation } from '../../../../charging-station/index.js'
+import type { JsonObject } from '../../../../types/index.js'
 import type { OCPPAuthAdapter } from '../interfaces/OCPPAuthService.js'
 import type {
   AuthConfiguration,
   AuthorizationResult,
   AuthRequest,
-  UnifiedIdentifier,
+  Identifier,
 } from '../types/AuthTypes.js'
 
-import { getConfigurationKey } from '../../../../charging-station/ConfigurationKeyUtils.js'
+import { getConfigurationKey } from '../../../../charging-station/index.js'
 import {
   type OCPP16AuthorizeRequest,
   type OCPP16AuthorizeResponse,
+  OCPP16StandardParametersKey,
+  OCPPVersion,
   RequestCommand,
   StandardParametersKey,
 } from '../../../../types/index.js'
-import { OCPPVersion } from '../../../../types/ocpp/OCPPVersion.js'
-import { logger } from '../../../../utils/index.js'
+import {
+  convertToBoolean,
+  convertToIntOrNaN,
+  getErrorMessage,
+  isEmpty,
+  logger,
+  truncateId,
+} from '../../../../utils/index.js'
 import {
   AuthContext,
   AuthenticationMethod,
@@ -32,22 +41,22 @@ const moduleName = 'OCPP16AuthAdapter'
  * OCPP 1.6 Authentication Adapter
  *
  * Handles authentication for OCPP 1.6 charging stations by translating
- * between unified auth types and OCPP 1.6 specific types and protocols.
+ * between auth types and OCPP 1.6 specific types and protocols.
  */
-export class OCPP16AuthAdapter implements OCPPAuthAdapter {
+export class OCPP16AuthAdapter implements OCPPAuthAdapter<string> {
   readonly ocppVersion = OCPPVersion.VERSION_16
 
   constructor (private readonly chargingStation: ChargingStation) {}
 
   /**
    * Perform remote authorization using OCPP 1.6 Authorize message
-   * @param identifier - Unified identifier containing the idTag to authorize
+   * @param identifier - Identifier containing the idTag to authorize
    * @param connectorId - Connector ID where authorization is requested
    * @param transactionId - Active transaction ID if authorizing during a transaction
-   * @returns Authorization result with OCPP 1.6 status mapped to unified format
+   * @returns Authorization result with OCPP 1.6 status mapped to auth format
    */
   async authorizeRemote (
-    identifier: UnifiedIdentifier,
+    identifier: Identifier,
     connectorId?: number,
     transactionId?: number | string
   ): Promise<AuthorizationResult> {
@@ -55,7 +64,7 @@ export class OCPP16AuthAdapter implements OCPPAuthAdapter {
 
     try {
       logger.debug(
-        `${this.chargingStation.logPrefix()} ${moduleName}.${methodName}: Authorizing identifier ${identifier.value} via OCPP 1.6`
+        `${this.chargingStation.logPrefix()} ${moduleName}.${methodName}: Authorizing identifier '${truncateId(identifier.value)}' via OCPP 1.6`
       )
 
       // Mark connector as authorizing if provided
@@ -74,7 +83,7 @@ export class OCPP16AuthAdapter implements OCPPAuthAdapter {
         idTag: identifier.value,
       })
 
-      // Convert response to unified format
+      // Convert response to auth format
       const result: AuthorizationResult = {
         additionalInfo: {
           connectorId,
@@ -104,7 +113,7 @@ export class OCPP16AuthAdapter implements OCPPAuthAdapter {
       return {
         additionalInfo: {
           connectorId,
-          error: error instanceof Error ? error.message : 'Unknown error',
+          error: getErrorMessage(error),
           transactionId,
         },
         isOffline: false,
@@ -116,18 +125,35 @@ export class OCPP16AuthAdapter implements OCPPAuthAdapter {
   }
 
   /**
-   * Convert unified identifier to OCPP 1.6 idTag string
-   * @param identifier - Unified identifier to convert
+   * Convert identifier to OCPP 1.6 idTag string
+   * @param identifier - Identifier to convert
    * @returns OCPP 1.6 idTag string value
    */
-  convertFromUnifiedIdentifier (identifier: UnifiedIdentifier): string {
+  convertFromIdentifier (identifier: Identifier): string {
     // For OCPP 1.6, we always return the string value
     return identifier.value
   }
 
   /**
-   * Convert unified authorization result to OCPP 1.6 response format
-   * @param result - Unified authorization result to convert
+   * Convert OCPP 1.6 idTag to identifier
+   * @param identifier - OCPP 1.6 idTag string to convert
+   * @param additionalData - Optional metadata to include in identifier
+   * @returns Identifier with ID_TAG type
+   */
+  convertToIdentifier (identifier: string, additionalData?: Record<string, unknown>): Identifier {
+    return {
+      additionalInfo: additionalData
+        ? Object.fromEntries(Object.entries(additionalData).map(([k, v]) => [k, String(v)]))
+        : undefined,
+      parentId: additionalData?.parentId as string | undefined,
+      type: IdentifierType.ID_TAG,
+      value: identifier,
+    }
+  }
+
+  /**
+   * Convert authorization result to OCPP 1.6 response format
+   * @param result - Authorization result to convert
    * @returns OCPP 1.6 AuthorizeResponse with idTagInfo structure
    */
   convertToOCPP16Response (result: AuthorizationResult): OCPP16AuthorizeResponse {
@@ -141,33 +167,12 @@ export class OCPP16AuthAdapter implements OCPPAuthAdapter {
   }
 
   /**
-   * Convert OCPP 1.6 idTag to unified identifier
-   * @param identifier - OCPP 1.6 idTag string to convert
-   * @param additionalData - Optional metadata to include in unified identifier
-   * @returns Unified identifier with ID_TAG type and OCPP 1.6 version
-   */
-  convertToUnifiedIdentifier (
-    identifier: string,
-    additionalData?: Record<string, unknown>
-  ): UnifiedIdentifier {
-    return {
-      additionalInfo: additionalData
-        ? Object.fromEntries(Object.entries(additionalData).map(([k, v]) => [k, String(v)]))
-        : undefined,
-      ocppVersion: OCPPVersion.VERSION_16,
-      parentId: additionalData?.parentId as string | undefined,
-      type: IdentifierType.ID_TAG,
-      value: identifier,
-    }
-  }
-
-  /**
    * Create authorization request from OCPP 1.6 context
    * @param idTag - OCPP 1.6 idTag string for authorization
    * @param connectorId - Connector where authorization is requested
    * @param transactionId - Transaction ID if in transaction context
    * @param context - Authorization context string (e.g., 'start', 'stop', 'remote_start')
-   * @returns Unified auth request with identifier and context information
+   * @returns Auth request with identifier and context information
    */
   createAuthRequest (
     idTag: string,
@@ -175,7 +180,7 @@ export class OCPP16AuthAdapter implements OCPPAuthAdapter {
     transactionId?: number,
     context?: string
   ): AuthRequest {
-    const identifier = this.convertToUnifiedIdentifier(idTag)
+    const identifier = this.convertToIdentifier(idTag)
 
     // Map context string to AuthContext enum
     let authContext: AuthContext
@@ -213,10 +218,9 @@ export class OCPP16AuthAdapter implements OCPPAuthAdapter {
   }
 
   /**
-   * Get OCPP 1.6 specific configuration schema
-   * @returns JSON schema object describing valid OCPP 1.6 auth configuration properties
+   * @returns Configuration schema object for OCPP 1.6 authorization settings
    */
-  getConfigurationSchema (): Record<string, unknown> {
+  getConfigurationSchema (): JsonObject {
     return {
       properties: {
         allowOfflineTxForUnknownId: {
@@ -256,10 +260,28 @@ export class OCPP16AuthAdapter implements OCPPAuthAdapter {
   }
 
   /**
+   * Read maximum local auth list entries from OCPP 1.6 LocalAuthListMaxLength config key.
+   * @returns Maximum entries limit, or undefined if not configured
+   */
+  getMaxLocalAuthListEntries (): number | undefined {
+    const configKey = getConfigurationKey(
+      this.chargingStation,
+      OCPP16StandardParametersKey.LocalAuthListMaxLength
+    )
+    if (configKey?.value != null) {
+      const parsed = convertToIntOrNaN(configKey.value)
+      if (!Number.isNaN(parsed) && parsed > 0) {
+        return parsed
+      }
+    }
+    return undefined
+  }
+
+  /**
    * Get adapter-specific status information
    * @returns Status object with online state, auth settings, and station identifier
    */
-  getStatus (): Record<string, unknown> {
+  getStatus (): JsonObject {
     return {
       isOnline: this.chargingStation.inAcceptedState(),
       localAuthEnabled: this.chargingStation.getLocalAuthListEnabled(),
@@ -284,7 +306,7 @@ export class OCPP16AuthAdapter implements OCPPAuthAdapter {
       return remoteAuthEnabled && isOnline
     } catch (error) {
       logger.warn(
-        `${this.chargingStation.logPrefix()} Error checking remote authorization availability`,
+        `${this.chargingStation.logPrefix()} ${moduleName}.isRemoteAvailable: Error checking remote authorization availability`,
         error
       )
       return false
@@ -293,20 +315,17 @@ export class OCPP16AuthAdapter implements OCPPAuthAdapter {
 
   /**
    * Check if identifier is valid for OCPP 1.6
-   * @param identifier - Unified identifier to validate
+   * @param identifier - Identifier to validate
    * @returns True if identifier has valid ID_TAG type and length within OCPP 1.6 limits
    */
-  isValidIdentifier (identifier: UnifiedIdentifier): boolean {
+  isValidIdentifier (identifier: Identifier): boolean {
     // OCPP 1.6 idTag validation
     if (!identifier.value || typeof identifier.value !== 'string') {
       return false
     }
 
     // Check length (OCPP 1.6 spec: max 20 characters)
-    if (
-      identifier.value.length === 0 ||
-      identifier.value.length > AuthValidators.MAX_IDTAG_LENGTH
-    ) {
+    if (isEmpty(identifier.value) || identifier.value.length > AuthValidators.MAX_IDTAG_LENGTH) {
       return false
     }
 
@@ -331,7 +350,7 @@ export class OCPP16AuthAdapter implements OCPPAuthAdapter {
 
       if (!hasLocalAuth && !hasRemoteAuth) {
         logger.warn(
-          `${this.chargingStation.logPrefix()} OCPP 1.6 adapter: No authorization methods enabled`
+          `${this.chargingStation.logPrefix()} ${moduleName}.validateConfiguration: No authorization methods enabled`
         )
         return false
       }
@@ -339,7 +358,7 @@ export class OCPP16AuthAdapter implements OCPPAuthAdapter {
       // Validate timeout values
       if (config.authorizationTimeout < 1) {
         logger.warn(
-          `${this.chargingStation.logPrefix()} OCPP 1.6 adapter: Invalid authorization timeout`
+          `${this.chargingStation.logPrefix()} ${moduleName}.validateConfiguration: Invalid authorization timeout`
         )
         return false
       }
@@ -347,7 +366,7 @@ export class OCPP16AuthAdapter implements OCPPAuthAdapter {
       return true
     } catch (error) {
       logger.error(
-        `${this.chargingStation.logPrefix()} OCPP 1.6 adapter configuration validation failed`,
+        `${this.chargingStation.logPrefix()} ${moduleName}.validateConfiguration: Configuration validation failed`,
         error
       )
       return false
@@ -364,10 +383,10 @@ export class OCPP16AuthAdapter implements OCPPAuthAdapter {
         this.chargingStation,
         StandardParametersKey.AllowOfflineTxForUnknownId
       )
-      return configKey?.value === 'true'
+      return convertToBoolean(configKey?.value)
     } catch (error) {
       logger.warn(
-        `${this.chargingStation.logPrefix()} Error getting offline transaction config`,
+        `${this.chargingStation.logPrefix()} ${moduleName}.getOfflineTransactionConfig: Error getting offline transaction config`,
         error
       )
       return false

@@ -6,61 +6,46 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 
-import type { ChargingStation } from '../../../../src/charging-station/ChargingStation.js'
-import type { ConnectorStatus } from '../../../../src/types/ConnectorStatus.js'
+import type { ChargingStation } from '../../../../src/charging-station/index.js'
+import type { ConnectorStatus } from '../../../../src/types/index.js'
 
 import { OCPP20IncomingRequestService } from '../../../../src/charging-station/ocpp/2.0/OCPP20IncomingRequestService.js'
 import {
   ConnectorStatusEnum,
-  type OCPP20RequestStartTransactionRequest,
-  RequestStartStopStatusEnumType,
-} from '../../../../src/types/index.js'
-import { OperationalStatusEnumType } from '../../../../src/types/ocpp/2.0/Common.js'
-import {
   OCPP20ChargingProfileKindEnumType,
   OCPP20ChargingProfilePurposeEnumType,
   OCPP20IdTokenEnumType,
   type OCPP20IdTokenType,
-} from '../../../../src/types/ocpp/2.0/Transaction.js'
-import { OCPPVersion } from '../../../../src/types/ocpp/OCPPVersion.js'
-import { standardCleanup } from '../../../../tests/helpers/TestLifecycleHelpers.js'
+  OCPP20OperationalStatusEnumType,
+  type OCPP20RequestStartTransactionRequest,
+  OCPPVersion,
+  RequestStartStopStatusEnumType,
+} from '../../../../src/types/index.js'
+import { standardCleanup } from '../../../helpers/TestLifecycleHelpers.js'
+import { cleanupChargingStation, createMockChargingStation } from '../../helpers/StationHelpers.js'
 
 await describe('G03 - Remote Start Pre-Authorization', async () => {
   let service: OCPP20IncomingRequestService | undefined
   let mockStation: ChargingStation | undefined
 
   beforeEach(() => {
-    // Mock charging station with EVSE configuration
-    mockStation = {
-      evses: new Map([
-        [
-          1,
-          {
-            connectors: new Map([[1, { status: ConnectorStatusEnum.Available }]]),
-          },
-        ],
-      ]),
-      getConnectorStatus: (_connectorId: number): ConnectorStatus => ({
-        availability: OperationalStatusEnumType.Operative,
-        MeterValues: [],
-        status: ConnectorStatusEnum.Available,
-        transactionId: undefined,
-        transactionIdTag: undefined,
-        transactionStart: undefined,
-        transactionStarted: false,
-      }),
-      inAcceptedState: () => true,
-      logPrefix: () => '[TEST-STATION-REMOTE-START]',
+    const { station } = createMockChargingStation({
+      connectorsCount: 1,
+      evseConfiguration: { evsesCount: 1 },
+      ocppVersion: OCPPVersion.VERSION_201,
       stationInfo: {
         chargingStationId: 'TEST-REMOTE-START',
-        ocppVersion: OCPPVersion.VERSION_201,
       },
-    } as unknown as ChargingStation
+    })
+    mockStation = station
 
     service = new OCPP20IncomingRequestService()
   })
 
   afterEach(() => {
+    if (mockStation != null) {
+      cleanupChargingStation(mockStation)
+    }
     standardCleanup()
     mockStation = undefined
     service = undefined
@@ -221,8 +206,7 @@ await describe('G03 - Remote Start Pre-Authorization', async () => {
       // Given: Request without evseId (undefined)
 
       const request: OCPP20RequestStartTransactionRequest = {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-explicit-any -- testing invalid undefined input
-        evseId: undefined as any,
+        evseId: undefined,
         idToken: {
           idToken: 'VALID_TOKEN_006',
           type: OCPP20IdTokenEnumType.ISO14443,
@@ -240,7 +224,7 @@ await describe('G03 - Remote Start Pre-Authorization', async () => {
       assert(mockStation != null)
       // Given: Connector with active transaction
       mockStation.getConnectorStatus = (): ConnectorStatus => ({
-        availability: OperationalStatusEnumType.Operative,
+        availability: OCPP20OperationalStatusEnumType.Operative,
         MeterValues: [],
         status: ConnectorStatusEnum.Occupied,
         transactionId: 'existing-tx-123',
@@ -266,7 +250,7 @@ await describe('G03 - Remote Start Pre-Authorization', async () => {
       const existingTransactionId = 'existing-tx-456'
       const existingTokenTag = 'EXISTING_TOKEN_002'
       mockStation.getConnectorStatus = (): ConnectorStatus => ({
-        availability: OperationalStatusEnumType.Operative,
+        availability: OCPP20OperationalStatusEnumType.Operative,
         MeterValues: [],
         status: ConnectorStatusEnum.Occupied,
         transactionId: existingTransactionId,
@@ -433,8 +417,8 @@ await describe('G03 - Remote Start Pre-Authorization', async () => {
       assert(mockStation != null)
       // Then: Charging station should have required configuration
       assert.notStrictEqual(mockStation, undefined)
-      assert.notStrictEqual(mockStation.evses, undefined)
-      assert.ok(mockStation.evses.size > 0)
+      assert.notStrictEqual(mockStation.getNumberOfEvses(), 0)
+      assert.ok(mockStation.getNumberOfEvses() > 0, 'should have at least one EVSE')
       assert.strictEqual(mockStation.stationInfo?.ocppVersion, OCPPVersion.VERSION_201)
     })
   })

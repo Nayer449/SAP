@@ -4,17 +4,19 @@
  *   and configuration key helpers for OCPP 1.6 unit and integration tests.
  */
 
-import type { ChargingStation } from '../../../../src/charging-station/ChargingStation.js'
-import type { ChargingStationInfo } from '../../../../src/types/ChargingStationInfo.js'
-import type { ConfigurationKey } from '../../../../src/types/ChargingStationOcppConfiguration.js'
-import type { JsonObject } from '../../../../src/types/JsonType.js'
-import type { SampledValueTemplate } from '../../../../src/types/MeasurandPerPhaseSampledValueTemplates.js'
+import { millisecondsToSeconds } from 'date-fns'
+import { mock } from 'node:test'
+
+import type { ChargingStation } from '../../../../src/charging-station/index.js'
 import type {
+  ChargingStationInfo,
+  ConfigurationKey,
+  JsonObject,
   OCPP16ChargingProfile,
   OCPP16ChargingSchedulePeriod,
-} from '../../../../src/types/ocpp/1.6/ChargingProfile.js'
-import type { OCPP16SampledValue } from '../../../../src/types/ocpp/1.6/MeterValues.js'
-import type { IncomingRequestCommand, RequestCommand } from '../../../../src/types/ocpp/Requests.js'
+  OCPP16SampledValue,
+  SampledValueTemplate,
+} from '../../../../src/types/index.js'
 
 import {
   createTestableIncomingRequestService,
@@ -26,20 +28,20 @@ import { OCPP16IncomingRequestService } from '../../../../src/charging-station/o
 import { OCPP16RequestService } from '../../../../src/charging-station/ocpp/1.6/OCPP16RequestService.js'
 import { OCPP16ResponseService } from '../../../../src/charging-station/ocpp/1.6/OCPP16ResponseService.js'
 import {
+  OCPP16ChargingProfileKindType,
   OCPP16ChargingProfilePurposeType,
   OCPP16ChargingRateUnitType,
   type OCPP16RequestCommand,
   OCPP16StandardParametersKey,
   OCPPVersion,
 } from '../../../../src/types/index.js'
-import { OCPP16ChargingProfileKindType } from '../../../../src/types/ocpp/1.6/ChargingProfile.js'
 import { Constants } from '../../../../src/utils/index.js'
-import { TEST_CHARGING_STATION_BASE_NAME } from '../../ChargingStationTestConstants.js'
+import { TEST_CHARGING_STATION_BASE_NAME, TEST_ID_TAG } from '../../ChargingStationTestConstants.js'
 import {
   createMockChargingStation,
   type MockChargingStation,
   type MockOCPPRequestService,
-} from '../../ChargingStationTestUtils.js'
+} from '../../helpers/StationHelpers.js'
 
 // ============================================================================
 // Test Context Types
@@ -95,12 +97,9 @@ export function createCommandsSupport (config: {
   outgoingCommands?: Record<string, boolean>
 }): NonNullable<ChargingStationInfo['commandsSupport']> {
   return {
-    incomingCommands: (config.incomingCommands ?? {}) as unknown as Record<
-      IncomingRequestCommand,
-      boolean
-    >,
+    incomingCommands: config.incomingCommands ?? {},
     ...(config.outgoingCommands != null && {
-      outgoingCommands: config.outgoingCommands as unknown as Record<RequestCommand, boolean>,
+      outgoingCommands: config.outgoingCommands,
     }),
   }
 }
@@ -113,7 +112,7 @@ export function createCommandsSupport (config: {
  * @returns The entries typed as `SampledValueTemplate[]`
  */
 export function createMeterValuesTemplate (entries: OCPP16SampledValue[]): SampledValueTemplate[] {
-  return entries as unknown as SampledValueTemplate[]
+  return entries
 }
 
 /**
@@ -136,16 +135,40 @@ export function createOCPP16IncomingRequestTestContext (
   const { station } = createMockChargingStation({
     baseName,
     connectorsCount,
-    heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
     stationInfo: {
       ocppStrictCompliance: false,
       ocppVersion: OCPPVersion.VERSION_16,
       ...stationInfo,
     },
-    websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+    websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
   })
 
   return { incomingRequestService, station, testableService }
+}
+
+/**
+ * Create a listener station with a mocked request handler for OCPP 1.6 tests.
+ * @param baseName - Base name for the charging station
+ * @returns Object containing the mock request handler and charging station
+ */
+export function createOCPP16ListenerStation (baseName: string): {
+  requestHandlerMock: ReturnType<typeof mock.fn>
+  station: ChargingStation
+} {
+  const requestHandlerMock = mock.fn(async () => Promise.resolve({}))
+  const { station } = createMockChargingStation({
+    baseName,
+    connectorsCount: 2,
+    ocppRequestService: {
+      requestHandler: requestHandlerMock,
+    },
+    stationInfo: {
+      ocppStrictCompliance: false,
+      ocppVersion: OCPPVersion.VERSION_16,
+    },
+    websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
+  })
+  return { requestHandlerMock, station }
 }
 
 /**
@@ -165,13 +188,12 @@ export function createOCPP16RequestTestContext (
   const { station } = createMockChargingStation({
     baseName,
     connectorsCount: 2,
-    heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
     stationInfo: {
       ocppStrictCompliance: false,
       ocppVersion: OCPPVersion.VERSION_16,
       ...stationInfo,
     },
-    websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+    websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
   })
 
   return { requestService, station, testableRequestService }
@@ -196,13 +218,12 @@ export function createOCPP16ResponseTestContext (
   const { station } = createMockChargingStation({
     baseName,
     connectorsCount: 2,
-    heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
     stationInfo: {
       ocppStrictCompliance: false,
       ocppVersion: OCPPVersion.VERSION_16,
       ...stationInfo,
     },
-    websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+    websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
   })
 
   return { responseService, station }
@@ -226,17 +247,16 @@ export function createStandardStation (
   const { station } = createMockChargingStation({
     baseName,
     connectorsCount,
-    heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
     stationInfo: {
       ocppStrictCompliance: false,
       ocppVersion: OCPPVersion.VERSION_16,
       resetTime: 5000,
       ...stationInfo,
     },
-    websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+    websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
   })
 
-  return station as MockChargingStation
+  return station
 }
 
 /**
@@ -255,12 +275,7 @@ export async function dispatchResponse (
   payload: JsonObject,
   requestPayload: JsonObject = {}
 ): Promise<void> {
-  await responseService.responseHandler(
-    station,
-    command,
-    payload as unknown as Parameters<OCPP16ResponseService['responseHandler']>[2],
-    requestPayload as unknown as Parameters<OCPP16ResponseService['responseHandler']>[3]
-  )
+  await responseService.responseHandler(station, command, payload, requestPayload)
 }
 
 /**
@@ -269,8 +284,7 @@ export async function dispatchResponse (
  * @param chargingStation - Charging station instance whose connector state should be reset
  */
 export function resetConnectorTransactionState (chargingStation: ChargingStation): void {
-  for (const [connectorId, connectorStatus] of chargingStation.connectors.entries()) {
-    if (connectorId === 0) continue
+  for (const { connectorStatus } of chargingStation.iterateConnectors(true)) {
     connectorStatus.transactionStarted = false
     connectorStatus.transactionId = undefined
     connectorStatus.transactionIdTag = undefined
@@ -299,7 +313,7 @@ export function resetLimits (chargingStation: ChargingStation) {
   upsertConfigurationKey(
     chargingStation,
     OCPP16StandardParametersKey.HeartbeatInterval,
-    Constants.DEFAULT_HEARTBEAT_INTERVAL.toString()
+    millisecondsToSeconds(Constants.DEFAULT_HEARTBEAT_INTERVAL_MS).toString()
   )
 }
 
@@ -401,7 +415,7 @@ export const ReservationFixtures = {
   createReservation: (
     connectorId = 1,
     reservationId = 1,
-    idTag = 'TEST-TAG-001',
+    idTag = TEST_ID_TAG,
     expiryDate = new Date(Date.now() + 3600000)
   ) => ({
     connectorId,
@@ -425,7 +439,7 @@ export const ResetFixtures = {
 } as const
 
 export const TransactionFixtures = {
-  createStartTransactionParams: (connectorId = 1, idTag = 'TEST-TAG-001') => ({
+  createStartTransactionParams: (connectorId = 1, idTag = TEST_ID_TAG) => ({
     connectorId,
     idTag,
   }),

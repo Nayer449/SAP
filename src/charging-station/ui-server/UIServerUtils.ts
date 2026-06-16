@@ -1,29 +1,32 @@
 import type { IncomingMessage } from 'node:http'
 
-import { BaseError } from '../../exception/index.js'
 import { Protocol, ProtocolVersion } from '../../types/index.js'
 import { isEmpty, logger, logPrefix } from '../../utils/index.js'
 
+export enum HttpMethod {
+  DELETE = 'DELETE',
+  GET = 'GET',
+  PATCH = 'PATCH',
+  POST = 'POST',
+  PUT = 'PUT',
+}
+
 export const getUsernameAndPasswordFromAuthorizationToken = (
-  authorizationToken: string,
-  next: (err?: Error) => void
+  authorizationToken: string
 ): [string, string] | undefined => {
   try {
     const authentication = Buffer.from(authorizationToken, 'base64').toString('utf8')
     const separatorIndex = authentication.indexOf(':')
     if (separatorIndex === -1) {
-      next(new BaseError('Invalid basic authentication token format: missing ":" separator'))
       return undefined
     }
     const username = authentication.slice(0, separatorIndex)
     const password = authentication.slice(separatorIndex + 1)
-    if (isEmpty(username)) {
-      next(new BaseError('Invalid basic authentication token format: empty username'))
+    if (isEmpty(username) || isEmpty(password)) {
       return undefined
     }
     return [username, password]
-  } catch (error) {
-    next(new BaseError(`Invalid basic authentication token format: ${(error as Error).message}`))
+  } catch {
     return undefined
   }
 }
@@ -75,8 +78,4 @@ export const getProtocolAndVersion = (
     return undefined
   }
   return [protocol, version] as [Protocol, ProtocolVersion]
-}
-
-export const isLoopback = (address: string): boolean => {
-  return /^localhost$|^127(?:\.\d+){0,2}\.\d+$|^(?:0*:)*?:?0*1$/i.test(address)
 }

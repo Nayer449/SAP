@@ -12,6 +12,7 @@ import { createTestableRequestService } from '../../../../src/charging-station/o
 import {
   CertificateSigningUseEnumType,
   GenericStatus,
+  type JsonType,
   OCPP20RequestCommand,
   type OCPP20SignCertificateRequest,
   type OCPP20SignCertificateResponse,
@@ -21,7 +22,7 @@ import {
 import { Constants } from '../../../../src/utils/index.js'
 import { standardCleanup } from '../../../helpers/TestLifecycleHelpers.js'
 import { TEST_CHARGING_STATION_BASE_NAME } from '../../ChargingStationTestConstants.js'
-import { createMockChargingStation } from '../../ChargingStationTestUtils.js'
+import { createMockChargingStation } from '../../helpers/StationHelpers.js'
 
 const MOCK_ORGANIZATION_NAME = 'Test Organization Inc.'
 
@@ -33,15 +34,13 @@ await describe('I02 - SignCertificate Request', async () => {
       baseName: TEST_CHARGING_STATION_BASE_NAME,
       connectorsCount: 3,
       evseConfiguration: { evsesCount: 3 },
-      heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
       stationInfo: {
         ocppStrictCompliance: false,
         ocppVersion: OCPPVersion.VERSION_201,
       },
-      websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+      websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
     })
     station = createdStation
-    // Set up configuration with OrganizationName
     station.ocppConfiguration = {
       configurationKey: [
         { key: 'SecurityCtrlr.OrganizationName', readonly: false, value: MOCK_ORGANIZATION_NAME },
@@ -62,23 +61,27 @@ await describe('I02 - SignCertificate Request', async () => {
           },
         })
 
-      const response = await service.requestSignCertificate(
+      const response = await service.requestHandler<JsonType, OCPP20SignCertificateResponse>(
         station,
-        CertificateSigningUseEnumType.ChargingStationCertificate
+        OCPP20RequestCommand.SIGN_CERTIFICATE,
+        { certificateType: CertificateSigningUseEnumType.ChargingStationCertificate }
       )
 
       assert.notStrictEqual(response, undefined)
       assert.strictEqual(response.status, GenericStatus.Accepted)
 
-      assert.ok(sendMessageMock.mock.calls.length > 0)
+      assert.ok(
+        sendMessageMock.mock.calls.length > 0,
+        'sendMessage should have been called at least once'
+      )
 
       const sentPayload = sendMessageMock.mock.calls[0].arguments[2] as OCPP20SignCertificateRequest
       assert.notStrictEqual(sentPayload.csr, undefined)
-      assert.ok(sentPayload.csr.includes('-----BEGIN CERTIFICATE REQUEST-----'))
-      assert.ok(sentPayload.csr.includes('-----END CERTIFICATE REQUEST-----'))
+      assert.ok(sentPayload.csr.startsWith('-----BEGIN CERTIFICATE REQUEST-----'))
+      assert.ok(sentPayload.csr.endsWith('-----END CERTIFICATE REQUEST-----'))
     })
 
-    await it('should include OrganizationName from SecurityCtrlr config in CSR', async () => {
+    await it('should generate CSR starting with BEGIN CERTIFICATE REQUEST marker', async () => {
       const { sendMessageMock, service } =
         createTestableRequestService<OCPP20SignCertificateResponse>({
           sendMessageResponse: {
@@ -86,22 +89,113 @@ await describe('I02 - SignCertificate Request', async () => {
           },
         })
 
-      await service.requestSignCertificate(
-        station,
-        CertificateSigningUseEnumType.ChargingStationCertificate
-      )
+      await service.requestHandler(station, OCPP20RequestCommand.SIGN_CERTIFICATE, {
+        certificateType: CertificateSigningUseEnumType.ChargingStationCertificate,
+      })
 
       const sentPayload = sendMessageMock.mock.calls[0].arguments[2] as OCPP20SignCertificateRequest
-      assert.notStrictEqual(sentPayload.csr, undefined)
-      assert.ok(sentPayload.csr.includes('-----BEGIN CERTIFICATE REQUEST-----'))
+      assert.ok(sentPayload.csr.startsWith('-----BEGIN CERTIFICATE REQUEST-----\n'))
+    })
 
-      const csrRegex =
-        /-----BEGIN CERTIFICATE REQUEST-----\n(.+?)\n-----END CERTIFICATE REQUEST-----/
-      const csrExecResult = csrRegex.exec(sentPayload.csr)
-      assert.notStrictEqual(csrExecResult, undefined)
-      const csrData = csrExecResult?.[1]
-      const decodedCsr = Buffer.from(csrData ?? '', 'base64').toString('utf-8')
-      assert.ok(decodedCsr.includes('O=Test Organization Inc.'))
+    await it('should generate CSR ending with END CERTIFICATE REQUEST marker', async () => {
+      const { sendMessageMock, service } =
+        createTestableRequestService<OCPP20SignCertificateResponse>({
+          sendMessageResponse: {
+            status: GenericStatus.Accepted,
+          },
+        })
+
+      await service.requestHandler(station, OCPP20RequestCommand.SIGN_CERTIFICATE, {
+        certificateType: CertificateSigningUseEnumType.ChargingStationCertificate,
+      })
+
+      const sentPayload = sendMessageMock.mock.calls[0].arguments[2] as OCPP20SignCertificateRequest
+      assert.ok(sentPayload.csr.endsWith('\n-----END CERTIFICATE REQUEST-----'))
+    })
+
+    await it('should generate CSR body with valid Base64 encoding', async () => {
+      const { sendMessageMock, service } =
+        createTestableRequestService<OCPP20SignCertificateResponse>({
+          sendMessageResponse: {
+            status: GenericStatus.Accepted,
+          },
+        })
+
+      await service.requestHandler(station, OCPP20RequestCommand.SIGN_CERTIFICATE, {
+        certificateType: CertificateSigningUseEnumType.ChargingStationCertificate,
+      })
+
+      const sentPayload = sendMessageMock.mock.calls[0].arguments[2] as OCPP20SignCertificateRequest
+      const csrLines = sentPayload.csr.split('\n')
+      const base64Body = csrLines.slice(1, -1).join('')
+      assert.ok(/^[A-Za-z0-9+/]+=*$/.test(base64Body), 'CSR body must be valid Base64')
+      const decoded = Buffer.from(base64Body, 'base64')
+      assert.ok(decoded.length > 0, 'Decoded CSR must not be empty')
+    })
+
+    await it('should include station ID in CSR subject DN', async () => {
+      const { sendMessageMock, service } =
+        createTestableRequestService<OCPP20SignCertificateResponse>({
+          sendMessageResponse: {
+            status: GenericStatus.Accepted,
+          },
+        })
+
+      await service.requestHandler(station, OCPP20RequestCommand.SIGN_CERTIFICATE, {
+        certificateType: CertificateSigningUseEnumType.ChargingStationCertificate,
+      })
+
+      const sentPayload = sendMessageMock.mock.calls[0].arguments[2] as OCPP20SignCertificateRequest
+      const csrLines = sentPayload.csr.split('\n')
+      const base64Body = csrLines.slice(1, -1).join('')
+      const derBytes = Buffer.from(base64Body, 'base64')
+      const stationId = station.stationInfo?.chargingStationId ?? ''
+      assert.ok(stationId.length > 0, 'Station ID must not be empty')
+      assert.ok(
+        derBytes.includes(Buffer.from(stationId, 'utf-8')),
+        'CSR DER must contain station ID'
+      )
+    })
+
+    await it('should include OrganizationName in CSR subject DN', async () => {
+      const { sendMessageMock, service } =
+        createTestableRequestService<OCPP20SignCertificateResponse>({
+          sendMessageResponse: {
+            status: GenericStatus.Accepted,
+          },
+        })
+
+      await service.requestHandler(station, OCPP20RequestCommand.SIGN_CERTIFICATE, {
+        certificateType: CertificateSigningUseEnumType.ChargingStationCertificate,
+      })
+
+      const sentPayload = sendMessageMock.mock.calls[0].arguments[2] as OCPP20SignCertificateRequest
+      const csrLines = sentPayload.csr.split('\n')
+      const base64Body = csrLines.slice(1, -1).join('')
+      const derBytes = Buffer.from(base64Body, 'base64')
+      assert.ok(
+        derBytes.includes(Buffer.from(MOCK_ORGANIZATION_NAME, 'utf-8')),
+        'CSR DER must contain organization name'
+      )
+    })
+
+    await it('should generate valid ASN.1 DER structure starting with SEQUENCE tag', async () => {
+      const { sendMessageMock, service } =
+        createTestableRequestService<OCPP20SignCertificateResponse>({
+          sendMessageResponse: {
+            status: GenericStatus.Accepted,
+          },
+        })
+
+      await service.requestHandler(station, OCPP20RequestCommand.SIGN_CERTIFICATE, {
+        certificateType: CertificateSigningUseEnumType.ChargingStationCertificate,
+      })
+
+      const sentPayload = sendMessageMock.mock.calls[0].arguments[2] as OCPP20SignCertificateRequest
+      const csrLines = sentPayload.csr.split('\n')
+      const base64Body = csrLines.slice(1, -1).join('')
+      const derBytes = Buffer.from(base64Body, 'base64')
+      assert.strictEqual(derBytes[0], 0x30, 'CSR DER must start with SEQUENCE tag (0x30)')
     })
   })
 
@@ -114,10 +208,9 @@ await describe('I02 - SignCertificate Request', async () => {
           },
         })
 
-      await service.requestSignCertificate(
-        station,
-        CertificateSigningUseEnumType.ChargingStationCertificate
-      )
+      await service.requestHandler(station, OCPP20RequestCommand.SIGN_CERTIFICATE, {
+        certificateType: CertificateSigningUseEnumType.ChargingStationCertificate,
+      })
 
       const sentPayload = sendMessageMock.mock.calls[0].arguments[2] as OCPP20SignCertificateRequest
 
@@ -137,7 +230,9 @@ await describe('I02 - SignCertificate Request', async () => {
           },
         })
 
-      await service.requestSignCertificate(station, CertificateSigningUseEnumType.V2GCertificate)
+      await service.requestHandler(station, OCPP20RequestCommand.SIGN_CERTIFICATE, {
+        certificateType: CertificateSigningUseEnumType.V2GCertificate,
+      })
 
       const sentPayload = sendMessageMock.mock.calls[0].arguments[2] as OCPP20SignCertificateRequest
 
@@ -153,9 +248,10 @@ await describe('I02 - SignCertificate Request', async () => {
         },
       })
 
-      const response = await service.requestSignCertificate(
+      const response = await service.requestHandler<JsonType, OCPP20SignCertificateResponse>(
         station,
-        CertificateSigningUseEnumType.ChargingStationCertificate
+        OCPP20RequestCommand.SIGN_CERTIFICATE,
+        { certificateType: CertificateSigningUseEnumType.ChargingStationCertificate }
       )
 
       assert.notStrictEqual(response, undefined)
@@ -172,9 +268,10 @@ await describe('I02 - SignCertificate Request', async () => {
         },
       })
 
-      const response = await service.requestSignCertificate(
+      const response = await service.requestHandler<JsonType, OCPP20SignCertificateResponse>(
         station,
-        CertificateSigningUseEnumType.ChargingStationCertificate
+        OCPP20RequestCommand.SIGN_CERTIFICATE,
+        { certificateType: CertificateSigningUseEnumType.ChargingStationCertificate }
       )
 
       assert.notStrictEqual(response, undefined)
@@ -193,12 +290,11 @@ await describe('I02 - SignCertificate Request', async () => {
           },
         })
 
-      await service.requestSignCertificate(station)
+      await service.requestHandler(station, OCPP20RequestCommand.SIGN_CERTIFICATE, {})
 
       const sentPayload = sendMessageMock.mock.calls[0].arguments[2] as OCPP20SignCertificateRequest
 
       assert.notStrictEqual(sentPayload.csr, undefined)
-      // certificateType should be undefined when not specified
       assert.strictEqual(sentPayload.certificateType, undefined)
     })
   })
@@ -212,21 +308,19 @@ await describe('I02 - SignCertificate Request', async () => {
           },
         })
 
-      await service.requestSignCertificate(
-        station,
-        CertificateSigningUseEnumType.ChargingStationCertificate
-      )
+      await service.requestHandler(station, OCPP20RequestCommand.SIGN_CERTIFICATE, {
+        certificateType: CertificateSigningUseEnumType.ChargingStationCertificate,
+      })
 
       assert.strictEqual(sendMessageMock.mock.calls.length, 1)
 
       const sentPayload = sendMessageMock.mock.calls[0].arguments[2] as OCPP20SignCertificateRequest
 
-      // Validate payload structure
       assert.strictEqual(typeof sentPayload, 'object')
       assert.notStrictEqual(sentPayload.csr, undefined)
       assert.strictEqual(typeof sentPayload.csr, 'string')
-      assert.ok(sentPayload.csr.length > 0)
-      assert.ok(sentPayload.csr.length <= 5500) // Max length per schema
+      assert.ok(sentPayload.csr.length > 0, 'CSR should not be empty')
+      assert.ok(sentPayload.csr.length <= 5500, 'CSR length should be at most 5500 characters')
     })
 
     await it('should send SIGN_CERTIFICATE command name', async () => {
@@ -237,10 +331,9 @@ await describe('I02 - SignCertificate Request', async () => {
           },
         })
 
-      await service.requestSignCertificate(
-        station,
-        CertificateSigningUseEnumType.ChargingStationCertificate
-      )
+      await service.requestHandler(station, OCPP20RequestCommand.SIGN_CERTIFICATE, {
+        certificateType: CertificateSigningUseEnumType.ChargingStationCertificate,
+      })
 
       const commandName = sendMessageMock.mock.calls[0].arguments[3]
 
@@ -254,12 +347,11 @@ await describe('I02 - SignCertificate Request', async () => {
         baseName: TEST_CHARGING_STATION_BASE_NAME,
         connectorsCount: 1,
         evseConfiguration: { evsesCount: 1 },
-        heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
         stationInfo: {
           ocppStrictCompliance: false,
           ocppVersion: OCPPVersion.VERSION_201,
         },
-        websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+        websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
       })
 
       stationWithoutCertManager.ocppConfiguration = {
@@ -275,9 +367,10 @@ await describe('I02 - SignCertificate Request', async () => {
           },
         })
 
-      const response = await service.requestSignCertificate(
+      const response = await service.requestHandler<JsonType, OCPP20SignCertificateResponse>(
         stationWithoutCertManager,
-        CertificateSigningUseEnumType.ChargingStationCertificate
+        OCPP20RequestCommand.SIGN_CERTIFICATE,
+        { certificateType: CertificateSigningUseEnumType.ChargingStationCertificate }
       )
 
       assert.notStrictEqual(response, undefined)

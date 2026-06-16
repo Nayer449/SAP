@@ -10,11 +10,12 @@ import type {
   OCPP20UnlockConnectorRequest,
   OCPP20UnlockConnectorResponse,
 } from '../../../../src/types/index.js'
-import type { MockChargingStation } from '../../ChargingStationTestUtils.js'
+import type { MockChargingStation } from '../../helpers/StationHelpers.js'
 
 import { createTestableIncomingRequestService } from '../../../../src/charging-station/ocpp/2.0/__testable__/index.js'
 import { OCPP20IncomingRequestService } from '../../../../src/charging-station/ocpp/2.0/OCPP20IncomingRequestService.js'
 import {
+  OCPP20RequestCommand,
   OCPPVersion,
   ReasonCodeEnumType,
   UnlockStatusEnumType,
@@ -22,7 +23,7 @@ import {
 import { Constants } from '../../../../src/utils/index.js'
 import { standardCleanup } from '../../../helpers/TestLifecycleHelpers.js'
 import { TEST_CHARGING_STATION_BASE_NAME } from '../../ChargingStationTestConstants.js'
-import { createMockChargingStation } from '../../ChargingStationTestUtils.js'
+import { createMockChargingStation } from '../../helpers/StationHelpers.js'
 
 /**
  * Create a mock station suitable for UnlockConnector tests.
@@ -40,16 +41,15 @@ function createUnlockConnectorStation (): {
     baseName: TEST_CHARGING_STATION_BASE_NAME,
     connectorsCount: 3,
     evseConfiguration: { evsesCount: 3 },
-    heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
     ocppRequestService: {
       requestHandler: requestHandlerMock,
     },
     stationInfo: {
       ocppVersion: OCPPVersion.VERSION_201,
     },
-    websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+    websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
   })
-  return { mockStation: station as MockChargingStation, requestHandlerMock }
+  return { mockStation: station, requestHandlerMock }
 }
 
 await describe('F05 - UnlockConnector', async () => {
@@ -137,10 +137,9 @@ await describe('F05 - UnlockConnector', async () => {
     await it('should return OngoingAuthorizedTransaction when specified connector has active transaction', async () => {
       const { mockStation } = createUnlockConnectorStation()
 
-      const evseStatus = mockStation.evses.get(1)
-      const connector = evseStatus?.connectors.get(1)
-      if (connector != null) {
-        connector.transactionId = 'tx-001'
+      const connectorStatus = mockStation.getConnectorStatus(1)
+      if (connectorStatus != null) {
+        connectorStatus.transactionId = 'tx-001'
       }
 
       const request: OCPP20UnlockConnectorRequest = { connectorId: 1, evseId: 1 }
@@ -164,19 +163,17 @@ await describe('F05 - UnlockConnector', async () => {
         baseName: TEST_CHARGING_STATION_BASE_NAME,
         connectorsCount: 2,
         evseConfiguration: { evsesCount: 1 },
-        heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
         ocppRequestService: {
           requestHandler: requestHandlerMock,
         },
         stationInfo: {
           ocppVersion: OCPPVersion.VERSION_201,
         },
-        websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+        websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
       })
       const multiConnectorStation = station as MockChargingStation
 
-      const evseStatus = multiConnectorStation.evses.get(1)
-      const connector2 = evseStatus?.connectors.get(2)
+      const connector2 = multiConnectorStation.getConnectorStatus(2)
       if (connector2 != null) {
         connector2.transactionId = 'tx-other'
       }
@@ -208,7 +205,9 @@ await describe('F05 - UnlockConnector', async () => {
       await testableService.handleRequestUnlockConnector(mockStation, request)
 
       // sendAndSetConnectorStatus calls requestHandler internally for StatusNotification
-      assert.ok(requestHandlerMock.mock.calls.length > 0)
+      assert.strictEqual(requestHandlerMock.mock.callCount(), 1)
+      const args = requestHandlerMock.mock.calls[0].arguments as [unknown, string]
+      assert.strictEqual(args[1], OCPP20RequestCommand.STATUS_NOTIFICATION)
     })
 
     await it('should return a Promise from async handler', async () => {

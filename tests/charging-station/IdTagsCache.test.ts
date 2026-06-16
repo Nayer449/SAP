@@ -15,13 +15,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, it } from 'node:test'
 
-import type { ChargingStation } from '../../src/charging-station/ChargingStation.js'
+import type { ChargingStation } from '../../src/charging-station/index.js'
 
-import { getIdTagsFile } from '../../src/charging-station/Helpers.js'
-import { IdTagsCache } from '../../src/charging-station/IdTagsCache.js'
+import { getIdTagsFile } from '../../src/charging-station/index.js'
+import { IdTagsCache } from '../../src/charging-station/index.js'
 import { IdTagDistribution } from '../../src/types/index.js'
 import { standardCleanup } from '../helpers/TestLifecycleHelpers.js'
-import { createMockChargingStation } from './ChargingStationTestUtils.js'
+import { createMockChargingStation } from './helpers/StationHelpers.js'
 
 const TEST_ID_TAGS = ['TAG-001', 'TAG-002', 'TAG-003']
 const TEST_ID_TAGS_FILE = 'test-idtags.json'

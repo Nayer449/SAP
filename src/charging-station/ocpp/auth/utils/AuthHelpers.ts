@@ -1,9 +1,17 @@
-import type { AuthorizationResult, AuthRequest, UnifiedIdentifier } from '../types/AuthTypes.js'
+import { millisecondsToSeconds } from 'date-fns'
 
-import { AuthContext, AuthenticationMethod, AuthorizationStatus } from '../types/AuthTypes.js'
+import type {
+  AuthContext,
+  AuthenticationMethod,
+  AuthorizationResult,
+  AuthRequest,
+  Identifier,
+} from '../types/AuthTypes.js'
+
+import { isEmpty, truncateId } from '../../../../utils/index.js'
+import { AuthorizationStatus } from '../types/AuthTypes.js'
 
 /**
- * Compute remaining TTL in seconds from an expiry date.
  * @param expiryDate - Expiry timestamp to compute TTL from
  * @returns TTL in seconds, or undefined if already expired or no date provided
  */
@@ -19,19 +27,19 @@ function calculateTTL (expiryDate?: Date): number | undefined {
     return undefined
   }
 
-  return Math.floor(ttlMs / 1000)
+  return millisecondsToSeconds(ttlMs)
 }
 
 /**
  * Build an AuthRequest with sensible defaults.
- * @param identifier - Unified identifier for the request
+ * @param identifier - Identifier for the request
  * @param context - Authentication context
  * @param connectorId - Optional connector ID
  * @param metadata - Optional additional metadata
  * @returns Fully populated AuthRequest
  */
 function createAuthRequest (
-  identifier: UnifiedIdentifier,
+  identifier: Identifier,
   context: AuthContext,
   connectorId?: number,
   metadata?: Record<string, unknown>
@@ -73,9 +81,8 @@ function createRejectedResult (
  * @param identifier - Identifier involved in the failed auth attempt
  * @returns Formatted error string with truncated identifier
  */
-function formatAuthError (error: Error, identifier: UnifiedIdentifier): string {
-  const identifierValue = identifier.value.substring(0, 8) + '...'
-  return `Authentication failed for identifier ${identifierValue} (${identifier.type}): ${error.message}`
+function formatAuthError (error: Error, identifier: Identifier): string {
+  return `Authentication failed for identifier '${truncateId(identifier.value)}' (${identifier.type}): ${error.message}`
 }
 
 /**
@@ -162,7 +169,7 @@ function isTemporaryFailure (result: AuthorizationResult): boolean {
  * @returns The first ACCEPTED result, or the first result with merged metadata
  */
 function mergeAuthResults (results: AuthorizationResult[]): AuthorizationResult | undefined {
-  if (results.length === 0) {
+  if (isEmpty(results)) {
     return undefined
   }
 

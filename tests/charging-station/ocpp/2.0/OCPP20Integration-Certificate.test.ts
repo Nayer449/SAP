@@ -15,7 +15,7 @@ import type {
 
 import { createTestableIncomingRequestService } from '../../../../src/charging-station/ocpp/2.0/__testable__/index.js'
 import { OCPP20IncomingRequestService } from '../../../../src/charging-station/ocpp/2.0/OCPP20IncomingRequestService.js'
-import { OCPPAuthServiceFactory } from '../../../../src/charging-station/ocpp/auth/services/OCPPAuthServiceFactory.js'
+import { OCPPAuthServiceFactory } from '../../../../src/charging-station/ocpp/auth/index.js'
 import {
   GetCertificateIdUseEnumType,
   HashAlgorithmEnumType,
@@ -26,7 +26,7 @@ import {
 import { Constants } from '../../../../src/utils/index.js'
 import { standardCleanup } from '../../../helpers/TestLifecycleHelpers.js'
 import { TEST_CHARGING_STATION_BASE_NAME } from '../../ChargingStationTestConstants.js'
-import { createMockChargingStation } from '../../ChargingStationTestUtils.js'
+import { createMockChargingStation } from '../../helpers/StationHelpers.js'
 
 /** @returns A mock station configured for certificate integration tests */
 function createIntegrationStation (): ChargingStation {
@@ -34,7 +34,6 @@ function createIntegrationStation (): ChargingStation {
     baseName: TEST_CHARGING_STATION_BASE_NAME,
     connectorsCount: 3,
     evseConfiguration: { evsesCount: 3 },
-    heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
     ocppRequestService: {
       requestHandler: async () => Promise.resolve({}),
     },
@@ -42,7 +41,7 @@ function createIntegrationStation (): ChargingStation {
       ocppStrictCompliance: false,
       ocppVersion: OCPPVersion.VERSION_201,
     },
-    websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+    websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
   })
   return station
 }

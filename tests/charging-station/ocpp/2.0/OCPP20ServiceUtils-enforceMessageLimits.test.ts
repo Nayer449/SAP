@@ -1,12 +1,16 @@
 /**
- * @file Tests for OCPP20ServiceUtils.enforceMessageLimits
+ * @file Tests for OCPP20ServiceUtils message limits enforcement
  * @description Verifies message limit enforcement logic for OCPP 2.0 payloads
  */
 
 import assert from 'node:assert/strict'
 import { afterEach, describe, it } from 'node:test'
 
-import { OCPP20ServiceUtils } from '../../../../src/charging-station/ocpp/2.0/OCPP20ServiceUtils.js'
+import {
+  OCPP20ServiceUtils,
+  type RejectionReason,
+} from '../../../../src/charging-station/ocpp/2.0/OCPP20ServiceUtils.js'
+import { OCPP20OptionalVariableName, ReasonCodeEnumType } from '../../../../src/types/index.js'
 import { standardCleanup } from '../../../helpers/TestLifecycleHelpers.js'
 
 interface MockLogger {
@@ -15,9 +19,9 @@ interface MockLogger {
 }
 
 interface RejectedResult {
-  info: string
+  additionalInfo: string
   original: TestItem
-  reasonCode: string
+  reasonCode: ReasonCodeEnumType
 }
 
 interface TestItem {
@@ -57,8 +61,8 @@ function makeMockStation () {
 
 /** @returns A builder function that creates rejected result objects */
 function makeRejectedBuilder () {
-  return (item: TestItem, reason: { info: string; reasonCode: string }): RejectedResult => ({
-    info: reason.info,
+  return (item: TestItem, reason: RejectionReason): RejectedResult => ({
+    additionalInfo: reason.additionalInfo,
     original: item,
     reasonCode: reason.reasonCode,
   })
@@ -73,7 +77,7 @@ await describe('OCPP20ServiceUtils.enforceMessageLimits', async () => {
     await it('should return rejected:false and empty results when both limits are 0', () => {
       const station = makeMockStation()
       const logger = makeMockLogger()
-      const items = [makeItem('HeartbeatInterval', '30')]
+      const items = [makeItem(OCPP20OptionalVariableName.HeartbeatInterval, '30')]
 
       const result = OCPP20ServiceUtils.enforceMessageLimits(
         station,
@@ -169,9 +173,9 @@ await describe('OCPP20ServiceUtils.enforceMessageLimits', async () => {
 
       assert.strictEqual(result.rejected, true)
       assert.strictEqual(result.results.length, 3)
-      for (const r of result.results as RejectedResult[]) {
-        assert.strictEqual(r.reasonCode, 'TooManyElements')
-        assert.ok(r.info.includes('ItemsPerMessage limit 2'))
+      for (const r of result.results) {
+        assert.strictEqual(r.reasonCode, ReasonCodeEnumType.TooManyElements)
+        assert.ok(r.additionalInfo.includes('ItemsPerMessage limit 2'))
       }
     })
 
@@ -193,8 +197,8 @@ await describe('OCPP20ServiceUtils.enforceMessageLimits', async () => {
 
       assert.strictEqual(result.rejected, true)
       assert.strictEqual(result.results.length, 2)
-      for (const r of result.results as RejectedResult[]) {
-        assert.strictEqual(r.reasonCode, 'TooManyElements')
+      for (const r of result.results) {
+        assert.strictEqual(r.reasonCode, ReasonCodeEnumType.TooManyElements)
       }
     })
 
@@ -223,7 +227,7 @@ await describe('OCPP20ServiceUtils.enforceMessageLimits', async () => {
     await it('should return rejected:false when data size is under the bytes limit', () => {
       const station = makeMockStation()
       const logger = makeMockLogger()
-      const items = [makeItem('HeartbeatInterval', '30')]
+      const items = [makeItem(OCPP20OptionalVariableName.HeartbeatInterval, '30')]
 
       const result = OCPP20ServiceUtils.enforceMessageLimits(
         station,
@@ -258,9 +262,9 @@ await describe('OCPP20ServiceUtils.enforceMessageLimits', async () => {
 
       assert.strictEqual(result.rejected, true)
       assert.strictEqual(result.results.length, 1)
-      const r = (result.results as RejectedResult[])[0]
-      assert.strictEqual(r.reasonCode, 'TooLargeElement')
-      assert.ok(r.info.includes('BytesPerMessage limit 1'))
+      const r = result.results[0]
+      assert.strictEqual(r.reasonCode, ReasonCodeEnumType.TooLargeElement)
+      assert.ok(r.additionalInfo.includes('BytesPerMessage limit 1'))
     })
 
     await it('should reject all items with TooLargeElement for multiple items over bytes limit', () => {
@@ -281,8 +285,8 @@ await describe('OCPP20ServiceUtils.enforceMessageLimits', async () => {
 
       assert.strictEqual(result.rejected, true)
       assert.strictEqual(result.results.length, 2)
-      for (const r of result.results as RejectedResult[]) {
-        assert.strictEqual(r.reasonCode, 'TooLargeElement')
+      for (const r of result.results) {
+        assert.strictEqual(r.reasonCode, ReasonCodeEnumType.TooLargeElement)
       }
     })
 
@@ -325,8 +329,8 @@ await describe('OCPP20ServiceUtils.enforceMessageLimits', async () => {
       )
 
       assert.strictEqual(result.rejected, true)
-      for (const r of result.results as RejectedResult[]) {
-        assert.strictEqual(r.reasonCode, 'TooManyElements')
+      for (const r of result.results) {
+        assert.strictEqual(r.reasonCode, ReasonCodeEnumType.TooManyElements)
       }
     })
   })
@@ -335,7 +339,7 @@ await describe('OCPP20ServiceUtils.enforceMessageLimits', async () => {
     await it('should pass original item to buildRejected callback', () => {
       const station = makeMockStation()
       const logger = makeMockLogger()
-      const item = makeItem('HeartbeatInterval', 'abc')
+      const item = makeItem(OCPP20OptionalVariableName.HeartbeatInterval, 'abc')
       const capturedItems: TestItem[] = []
 
       OCPP20ServiceUtils.enforceMessageLimits(
@@ -359,8 +363,8 @@ await describe('OCPP20ServiceUtils.enforceMessageLimits', async () => {
     await it('should pass reason with info and reasonCode to buildRejected callback', () => {
       const station = makeMockStation()
       const logger = makeMockLogger()
-      const item = makeItem('WebSocketPingInterval', 'xyz')
-      const capturedReasons: { info: string; reasonCode: string }[] = []
+      const item = makeItem(OCPP20OptionalVariableName.WebSocketPingInterval, 'xyz')
+      const capturedReasons: RejectionReason[] = []
 
       OCPP20ServiceUtils.enforceMessageLimits(
         station,
@@ -377,9 +381,9 @@ await describe('OCPP20ServiceUtils.enforceMessageLimits', async () => {
       )
 
       assert.strictEqual(capturedReasons.length, 1)
-      assert.strictEqual(capturedReasons[0].reasonCode, 'TooLargeElement')
-      assert.strictEqual(typeof capturedReasons[0].info, 'string')
-      assert.ok(capturedReasons[0].info.length > 0)
+      assert.strictEqual(capturedReasons[0].reasonCode, ReasonCodeEnumType.TooLargeElement)
+      assert.strictEqual(typeof capturedReasons[0].additionalInfo, 'string')
+      assert.ok(capturedReasons[0].additionalInfo.length > 0, 'additionalInfo should not be empty')
     })
   })
 })

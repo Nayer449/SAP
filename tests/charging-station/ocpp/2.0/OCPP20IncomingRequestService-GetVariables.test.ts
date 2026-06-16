@@ -1,8 +1,9 @@
-import { millisecondsToSeconds } from 'date-fns'
 /**
  * @file Tests for OCPP20IncomingRequestService GetVariables
  * @description Unit tests for OCPP 2.0 GetVariables command handling (B06)
  */
+
+import { millisecondsToSeconds } from 'date-fns'
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 
@@ -21,12 +22,12 @@ import {
   ReasonCodeEnumType,
 } from '../../../../src/types/index.js'
 import { Constants } from '../../../../src/utils/index.js'
-import { standardCleanup } from '../../../../tests/helpers/TestLifecycleHelpers.js'
+import { standardCleanup } from '../../../helpers/TestLifecycleHelpers.js'
 import {
   TEST_CHARGING_STATION_BASE_NAME,
   TEST_CONNECTOR_ID_VALID_INSTANCE,
 } from '../../ChargingStationTestConstants.js'
-import { createMockChargingStation } from '../../ChargingStationTestUtils.js'
+import { createMockChargingStation } from '../../helpers/StationHelpers.js'
 import {
   resetLimits,
   resetReportingValueSize,
@@ -44,12 +45,11 @@ await describe('B06 - Get Variables', async () => {
       baseName: TEST_CHARGING_STATION_BASE_NAME,
       connectorsCount: 3,
       evseConfiguration: { evsesCount: 3 },
-      heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
       stationInfo: {
         ocppStrictCompliance: false,
         ocppVersion: OCPPVersion.VERSION_201,
       },
-      websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+      websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
     })
     station = newStation
     incomingRequestService = new OCPP20IncomingRequestService()
@@ -90,7 +90,7 @@ await describe('B06 - Get Variables', async () => {
     assert.strictEqual(firstResult.attributeType, AttributeEnumType.Actual)
     assert.strictEqual(
       firstResult.attributeValue,
-      millisecondsToSeconds(Constants.DEFAULT_HEARTBEAT_INTERVAL).toString()
+      millisecondsToSeconds(Constants.DEFAULT_HEARTBEAT_INTERVAL_MS).toString()
     )
     assert.strictEqual(firstResult.component.name, OCPP20ComponentName.OCPPCommCtrlr)
     assert.strictEqual(firstResult.variable.name, OCPP20OptionalVariableName.HeartbeatInterval)
@@ -102,7 +102,7 @@ await describe('B06 - Get Variables', async () => {
     assert.strictEqual(secondResult.attributeType, AttributeEnumType.Actual)
     assert.strictEqual(
       secondResult.attributeValue,
-      Constants.DEFAULT_WEBSOCKET_PING_INTERVAL.toString()
+      Constants.DEFAULT_WS_PING_INTERVAL_SECONDS.toString()
     )
     assert.strictEqual(secondResult.component.name, OCPP20ComponentName.ChargingStation)
     assert.strictEqual(secondResult.variable.name, OCPP20OptionalVariableName.WebSocketPingInterval)
@@ -236,7 +236,7 @@ await describe('B06 - Get Variables', async () => {
       getVariableData: [
         {
           component: { name: OCPP20ComponentName.DeviceDataCtrlr },
-          variable: { name: OCPP20RequiredVariableName.ReportingValueSize },
+          variable: { name: OCPP20OptionalVariableName.ReportingValueSize },
         },
       ],
     }
@@ -326,7 +326,7 @@ await describe('B06 - Get Variables', async () => {
     setStrictLimits(station, 100, limit)
     const response = incomingRequestService.handleRequestGetVariables(station, request)
     const actualSize = Buffer.byteLength(JSON.stringify(response.getVariableResult), 'utf8')
-    assert.ok(actualSize > limit)
+    assert.ok(actualSize > limit, 'response size should exceed limit')
     assert.strictEqual(response.getVariableResult.length, request.getVariableData.length)
     response.getVariableResult.forEach(r => {
       assert.strictEqual(r.attributeStatus, GetVariableStatusEnumType.Rejected)
@@ -596,7 +596,10 @@ await describe('B06 - Get Variables', async () => {
     if (result.attributeValue == null) {
       assert.fail('Expected attributeValue to be defined')
     }
-    assert.ok(result.attributeValue.length <= 3)
+    assert.ok(
+      result.attributeValue.length <= 3,
+      'attributeValue should be truncated to at most 3 characters'
+    )
     resetReportingValueSize(station)
   })
 })

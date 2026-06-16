@@ -32,7 +32,7 @@ import {
   TEST_CHARGING_STATION_BASE_NAME,
   TEST_FIRMWARE_VERSION,
 } from '../../ChargingStationTestConstants.js'
-import { createMockChargingStation } from '../../ChargingStationTestUtils.js'
+import { createMockChargingStation } from '../../helpers/StationHelpers.js'
 
 await describe('B07/B08 - NotifyReport', async () => {
   let testableService: TestableOCPP20RequestService
@@ -45,7 +45,6 @@ await describe('B07/B08 - NotifyReport', async () => {
       baseName: TEST_CHARGING_STATION_BASE_NAME,
       connectorsCount: 3,
       evseConfiguration: { evsesCount: 3 },
-      heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
       stationInfo: {
         chargePointModel: TEST_CHARGE_POINT_MODEL,
         chargePointSerialNumber: TEST_CHARGE_POINT_SERIAL_NUMBER,
@@ -54,7 +53,7 @@ await describe('B07/B08 - NotifyReport', async () => {
         ocppStrictCompliance: false,
         ocppVersion: OCPPVersion.VERSION_201,
       },
-      websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+      websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
     })
     station = createdStation
   })
@@ -327,7 +326,6 @@ await describe('B07/B08 - NotifyReport', async () => {
       assert.notStrictEqual(payload, undefined)
       assert(payload.reportData != null)
       const firstReport = payload.reportData[0]
-      assert(firstReport.variableAttribute != null)
       assert.strictEqual(firstReport.variableAttribute[0].type, attributeType)
       assert.strictEqual(firstReport.variableAttribute[0].value, `Test Value ${index.toString()}`)
     })
@@ -382,7 +380,6 @@ await describe('B07/B08 - NotifyReport', async () => {
       assert(payload.reportData != null)
       const firstReport = payload.reportData[0]
       assert(firstReport.variableCharacteristics != null)
-      assert(firstReport.variableAttribute != null)
       assert.strictEqual(firstReport.variableCharacteristics.dataType, testCase.dataType)
       assert.strictEqual(firstReport.variableAttribute[0].value, testCase.value)
     })
@@ -492,7 +489,6 @@ await describe('B07/B08 - NotifyReport', async () => {
     assert.notStrictEqual(payload, undefined)
     assert(payload.reportData != null)
     const firstReport = payload.reportData[0]
-    assert(firstReport.variableAttribute != null)
     assert.strictEqual(firstReport.variableAttribute.length, 1)
     assert.strictEqual(firstReport.variableAttribute[0].type, AttributeEnumType.Actual)
   })
@@ -539,7 +535,7 @@ await describe('B07/B08 - NotifyReport', async () => {
 
     // Verify no additional properties are added
     const expectedKeys = ['generatedAt', 'reportData', 'requestId', 'seqNo', 'tbc']
-    const actualKeys = Object.keys(payload as object).sort()
+    const actualKeys = Object.keys(payload).sort()
     expectedKeys.sort()
     assert.deepStrictEqual(actualKeys, expectedKeys)
   })

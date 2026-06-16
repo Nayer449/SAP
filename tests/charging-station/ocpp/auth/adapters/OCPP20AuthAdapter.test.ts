@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 
-import type { ChargingStation } from '../../../../../src/charging-station/ChargingStation.js'
+import type { ChargingStation } from '../../../../../src/charging-station/index.js'
 
 import { OCPP20ServiceUtils } from '../../../../../src/charging-station/ocpp/2.0/OCPP20ServiceUtils.js'
 import { OCPP20AuthAdapter } from '../../../../../src/charging-station/ocpp/auth/adapters/OCPP20AuthAdapter.js'
@@ -19,9 +19,9 @@ import {
 import {
   OCPP20AuthorizationStatusEnumType,
   OCPP20IdTokenEnumType,
+  OCPPVersion,
   RequestStartStopStatusEnumType,
-} from '../../../../../src/types/ocpp/2.0/Transaction.js'
-import { OCPPVersion } from '../../../../../src/types/ocpp/OCPPVersion.js'
+} from '../../../../../src/types/index.js'
 import { standardCleanup } from '../../../../helpers/TestLifecycleHelpers.js'
 import { createMockAuthorizationResult, createMockIdentifier } from '../helpers/MockFactories.js'
 
@@ -47,33 +47,30 @@ await describe('OCPP20AuthAdapter', async () => {
 
   await describe('constructor', async () => {
     await it('should initialize with correct OCPP version', () => {
-      assert.strictEqual(adapter.ocppVersion, OCPPVersion.VERSION_20)
+      assert.strictEqual(adapter.ocppVersion, OCPPVersion.VERSION_201)
     })
   })
 
-  await describe('convertToUnifiedIdentifier', async () => {
-    await it('should convert OCPP 2.0 IdToken object to unified identifier', () => {
+  await describe('convertToIdentifier', async () => {
+    await it('should convert OCPP 2.0 IdToken object to identifier', () => {
       const idToken = {
         idToken: 'TEST_TOKEN',
         type: OCPP20IdTokenEnumType.Central,
       }
 
-      const result = adapter.convertToUnifiedIdentifier(idToken)
-      const expected = createMockIdentifier(OCPPVersion.VERSION_20, 'TEST_TOKEN')
+      const result = adapter.convertToIdentifier(idToken)
+      const expected = createMockIdentifier('TEST_TOKEN')
 
       assert.strictEqual(result.value, expected.value)
-      assert.strictEqual(result.type, IdentifierType.ID_TAG)
-      assert.strictEqual(result.ocppVersion, expected.ocppVersion)
+      assert.strictEqual(result.type, IdentifierType.CENTRAL)
       assert.strictEqual(result.additionalInfo?.ocpp20Type, OCPP20IdTokenEnumType.Central)
     })
 
-    await it('should convert string to unified identifier', () => {
-      const result = adapter.convertToUnifiedIdentifier('STRING_TOKEN')
-      const expected = createMockIdentifier(OCPPVersion.VERSION_20, 'STRING_TOKEN')
+    await it('should convert string to identifier', () => {
+      const result = adapter.convertToIdentifier('STRING_TOKEN')
 
-      assert.strictEqual(result.value, expected.value)
-      assert.strictEqual(result.type, expected.type)
-      assert.strictEqual(result.ocppVersion, expected.ocppVersion)
+      assert.strictEqual(result.value, 'STRING_TOKEN')
+      assert.strictEqual(result.type, IdentifierType.CENTRAL)
     })
 
     await it('should handle eMAID type correctly', () => {
@@ -82,7 +79,7 @@ await describe('OCPP20AuthAdapter', async () => {
         type: OCPP20IdTokenEnumType.eMAID,
       }
 
-      const result = adapter.convertToUnifiedIdentifier(idToken)
+      const result = adapter.convertToIdentifier(idToken)
 
       assert.strictEqual(result.value, 'EMAID123')
       assert.strictEqual(result.type, IdentifierType.E_MAID)
@@ -98,7 +95,7 @@ await describe('OCPP20AuthAdapter', async () => {
         type: OCPP20IdTokenEnumType.Local,
       }
 
-      const result = adapter.convertToUnifiedIdentifier(idToken)
+      const result = adapter.convertToIdentifier(idToken)
 
       assert.notStrictEqual(result.additionalInfo, undefined)
       assert.notStrictEqual(result.additionalInfo?.info_0, undefined)
@@ -106,37 +103,29 @@ await describe('OCPP20AuthAdapter', async () => {
     })
   })
 
-  await describe('convertFromUnifiedIdentifier', async () => {
-    await it('should convert unified identifier to OCPP 2.0 IdToken', () => {
-      const identifier = createMockIdentifier(
-        OCPPVersion.VERSION_20,
-        'CENTRAL_TOKEN',
-        IdentifierType.CENTRAL
-      )
+  await describe('convertFromIdentifier', async () => {
+    await it('should convert identifier to OCPP 2.0 IdToken', () => {
+      const identifier = createMockIdentifier('CENTRAL_TOKEN', IdentifierType.CENTRAL)
 
-      const result = adapter.convertFromUnifiedIdentifier(identifier)
+      const result = adapter.convertFromIdentifier(identifier)
 
       assert.strictEqual(result.idToken, 'CENTRAL_TOKEN')
       assert.strictEqual(result.type, OCPP20IdTokenEnumType.Central)
     })
 
     await it('should map E_MAID type correctly', () => {
-      const identifier = createMockIdentifier(
-        OCPPVersion.VERSION_20,
-        'EMAID_TOKEN',
-        IdentifierType.E_MAID
-      )
+      const identifier = createMockIdentifier('EMAID_TOKEN', IdentifierType.E_MAID)
 
-      const result = adapter.convertFromUnifiedIdentifier(identifier)
+      const result = adapter.convertFromIdentifier(identifier)
 
       assert.strictEqual(result.idToken, 'EMAID_TOKEN')
       assert.strictEqual(result.type, OCPP20IdTokenEnumType.eMAID)
     })
 
     await it('should handle ID_TAG to Local mapping', () => {
-      const identifier = createMockIdentifier(OCPPVersion.VERSION_20, 'LOCAL_TAG')
+      const identifier = createMockIdentifier('LOCAL_TAG')
 
-      const result = adapter.convertFromUnifiedIdentifier(identifier)
+      const result = adapter.convertFromIdentifier(identifier)
 
       assert.strictEqual(result.type, OCPP20IdTokenEnumType.Local)
     })
@@ -144,24 +133,19 @@ await describe('OCPP20AuthAdapter', async () => {
 
   await describe('isValidIdentifier', async () => {
     await it('should validate correct OCPP 2.0 identifier', () => {
-      const identifier = createMockIdentifier(
-        OCPPVersion.VERSION_20,
-        'VALID_TOKEN',
-        IdentifierType.CENTRAL
-      )
+      const identifier = createMockIdentifier('VALID_TOKEN', IdentifierType.CENTRAL)
 
       assert.strictEqual(adapter.isValidIdentifier(identifier), true)
     })
 
     await it('should reject identifier with empty value', () => {
-      const identifier = createMockIdentifier(OCPPVersion.VERSION_20, '', IdentifierType.CENTRAL)
+      const identifier = createMockIdentifier('', IdentifierType.CENTRAL)
 
       assert.strictEqual(adapter.isValidIdentifier(identifier), false)
     })
 
     await it('should reject identifier exceeding max length (36 chars)', () => {
       const identifier = createMockIdentifier(
-        OCPPVersion.VERSION_20,
         'THIS_TOKEN_IS_DEFINITELY_TOO_LONG_FOR_OCPP20_SPECIFICATION',
         IdentifierType.CENTRAL
       )
@@ -181,7 +165,7 @@ await describe('OCPP20AuthAdapter', async () => {
       ]
 
       for (const type of validTypes) {
-        const identifier = createMockIdentifier(OCPPVersion.VERSION_20, 'VALID_TOKEN', type)
+        const identifier = createMockIdentifier('VALID_TOKEN', type)
         assert.strictEqual(adapter.isValidIdentifier(identifier), true)
       }
     })
@@ -200,7 +184,7 @@ await describe('OCPP20AuthAdapter', async () => {
       assert.strictEqual(request.connectorId, 1)
       assert.strictEqual(request.transactionId, 'trans_123')
       assert.strictEqual(request.context, AuthContext.TRANSACTION_START)
-      assert.strictEqual(request.metadata?.ocppVersion, OCPPVersion.VERSION_20)
+      assert.strictEqual(request.metadata?.ocppVersion, OCPPVersion.VERSION_201)
     })
 
     await it('should map OCPP 2.0 contexts correctly', () => {
@@ -223,25 +207,18 @@ await describe('OCPP20AuthAdapter', async () => {
       // Mock isRemoteAvailable to return true (avoids OCPP20VariableManager singleton issues)
       t.mock.method(adapter, 'isRemoteAvailable', () => true)
 
-      // Mock sendTransactionEvent to return accepted authorization
-      t.mock.method(
-        OCPP20ServiceUtils,
-        'sendTransactionEvent',
-        () =>
-          new Promise<Record<string, unknown>>(resolve => {
-            resolve({
-              idTokenInfo: {
-                status: OCPP20AuthorizationStatusEnumType.Accepted,
-              },
-            })
+      // Mock requestHandler to return accepted authorization
+      mockStation.ocppRequestService = {
+        requestHandler: mock.fn(async () =>
+          Promise.resolve({
+            idTokenInfo: {
+              status: OCPP20AuthorizationStatusEnumType.Accepted,
+            },
           })
-      )
+        ),
+      } as unknown as ChargingStation['ocppRequestService']
 
-      const identifier = createMockIdentifier(
-        OCPPVersion.VERSION_20,
-        'VALID_TOKEN',
-        IdentifierType.CENTRAL
-      )
+      const identifier = createMockIdentifier('VALID_TOKEN', IdentifierType.CENTRAL)
 
       const result = await adapter.authorizeRemote(identifier, 1, 'tx_123')
 
@@ -252,7 +229,7 @@ await describe('OCPP20AuthAdapter', async () => {
     })
 
     await it('should handle invalid token gracefully', async () => {
-      const identifier = createMockIdentifier(OCPPVersion.VERSION_20, '', IdentifierType.CENTRAL)
+      const identifier = createMockIdentifier('', IdentifierType.CENTRAL)
 
       const result = await adapter.authorizeRemote(identifier, 1)
 
@@ -263,11 +240,7 @@ await describe('OCPP20AuthAdapter', async () => {
 
   await describe('isRemoteAvailable', async () => {
     await it('should return true when station is online and remote start enabled', t => {
-      t.mock.method(
-        adapter as unknown as { getVariableValue: () => string | undefined },
-        'getVariableValue',
-        () => 'true'
-      )
+      t.mock.method(OCPP20ServiceUtils, 'readVariableAsBoolean', () => true)
 
       const isAvailable = adapter.isRemoteAvailable()
       assert.strictEqual(isAvailable, true)
@@ -275,11 +248,7 @@ await describe('OCPP20AuthAdapter', async () => {
 
     await it('should return false when station is offline', t => {
       mockStation.inAcceptedState = () => false
-      t.mock.method(
-        adapter as unknown as { getVariableValue: () => string | undefined },
-        'getVariableValue',
-        () => 'true'
-      )
+      t.mock.method(OCPP20ServiceUtils, 'readVariableAsBoolean', () => true)
 
       const isAvailable = adapter.isRemoteAvailable()
       assert.strictEqual(isAvailable, false)
@@ -340,7 +309,7 @@ await describe('OCPP20AuthAdapter', async () => {
     await it('should return adapter status information', () => {
       const status = adapter.getStatus()
 
-      assert.strictEqual(status.ocppVersion, OCPPVersion.VERSION_20)
+      assert.strictEqual(status.ocppVersion, OCPPVersion.VERSION_201)
       assert.strictEqual(status.isOnline, true)
       assert.strictEqual(status.stationId, 'TEST-002')
       assert.notStrictEqual(status.supportsIdTokenTypes, undefined)
@@ -364,7 +333,7 @@ await describe('OCPP20AuthAdapter', async () => {
   })
 
   await describe('convertToOCPP20Response', async () => {
-    await it('should convert unified ACCEPTED status to OCPP 2.0 Accepted', () => {
+    await it('should convert ACCEPTED status to OCPP 2.0 Accepted', () => {
       const result = createMockAuthorizationResult({
         method: AuthenticationMethod.REMOTE_AUTHORIZATION,
       })
@@ -373,7 +342,7 @@ await describe('OCPP20AuthAdapter', async () => {
       assert.strictEqual(response, RequestStartStopStatusEnumType.Accepted)
     })
 
-    await it('should convert unified rejection statuses to OCPP 2.0 Rejected', () => {
+    await it('should convert rejection statuses to OCPP 2.0 Rejected', () => {
       const statuses = [
         AuthorizationStatus.BLOCKED,
         AuthorizationStatus.INVALID,
@@ -391,7 +360,7 @@ await describe('OCPP20AuthAdapter', async () => {
     })
   })
 
-  await describe('OCPP20AuthAdapter - G03.FR.02 Offline Authorization', async () => {
+  await describe('OCPP20AuthAdapter - C15 Offline Authorization', async () => {
     let offlineAdapter: OCPP20AuthAdapter
     let offlineMockChargingStation: ChargingStation
 
@@ -411,44 +380,38 @@ await describe('OCPP20AuthAdapter', async () => {
       mock.reset()
     })
 
-    await describe('G03.FR.02.001 - Offline detection', async () => {
-      await it('should detect station is offline when not in accepted state', () => {
-        // Given: Station is offline (not in accepted state)
+    await describe('C15 - Offline detection', async () => {
+      await it('should detect station is offline when not in accepted state', t => {
         offlineMockChargingStation.inAcceptedState = () => false
+        t.mock.method(OCPP20ServiceUtils, 'readVariableAsBoolean', () => true)
 
-        // When: Check if remote authorization is available
         const isAvailable = offlineAdapter.isRemoteAvailable()
 
-        // Then: Remote should not be available
         assert.strictEqual(isAvailable, false)
       })
 
-      await it('should detect station is online when in accepted state', () => {
-        // Given: Station is online (in accepted state)
+      await it('should detect station is online when in accepted state', t => {
         offlineMockChargingStation.inAcceptedState = () => true
+        t.mock.method(OCPP20ServiceUtils, 'readVariableAsBoolean', () => true)
 
-        // When: Check if remote authorization is available
         const isAvailable = offlineAdapter.isRemoteAvailable()
 
-        // Then: Remote should be available (assuming AuthorizeRemoteStart is enabled by default)
         assert.strictEqual(isAvailable, true)
       })
 
       await it('should have correct OCPP version for offline tests', () => {
         // Verify we're testing the correct OCPP version
-        assert.strictEqual(offlineAdapter.ocppVersion, OCPPVersion.VERSION_20)
+        assert.strictEqual(offlineAdapter.ocppVersion, OCPPVersion.VERSION_201)
       })
     })
 
-    await describe('G03.FR.02.002 - Remote availability check', async () => {
-      await it('should return false when offline even with valid configuration', () => {
-        // Given: Station is offline
+    await describe('C15 - Remote availability check', async () => {
+      await it('should return false when offline even with valid configuration', t => {
         offlineMockChargingStation.inAcceptedState = () => false
+        t.mock.method(OCPP20ServiceUtils, 'readVariableAsBoolean', () => true)
 
-        // When: Check remote availability
         const isAvailable = offlineAdapter.isRemoteAvailable()
 
-        // Then: Should not be available
         assert.strictEqual(isAvailable, false)
       })
 
@@ -466,11 +429,11 @@ await describe('OCPP20AuthAdapter', async () => {
       })
     })
 
-    await describe('G03.FR.02.003 - Configuration validation', async () => {
+    await describe('Configuration validation', async () => {
       await it('should initialize with default configuration for offline scenarios', () => {
         // When: Adapter is created
         // Then: Should have OCPP 2.0 version
-        assert.strictEqual(offlineAdapter.ocppVersion, OCPPVersion.VERSION_20)
+        assert.strictEqual(offlineAdapter.ocppVersion, OCPPVersion.VERSION_201)
       })
 
       await it('should validate configuration schema for offline auth', () => {
@@ -491,7 +454,7 @@ await describe('OCPP20AuthAdapter', async () => {
         // Then: Status should be defined and include online state
         assert.notStrictEqual(status, undefined)
         assert.strictEqual(typeof status.isOnline, 'boolean')
-        assert.strictEqual(status.ocppVersion, OCPPVersion.VERSION_20)
+        assert.strictEqual(status.ocppVersion, OCPPVersion.VERSION_201)
       })
     })
   })

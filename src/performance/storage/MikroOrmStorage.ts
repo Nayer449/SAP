@@ -5,7 +5,7 @@ import { type Options as MariaDbOptions, MikroORM as MariaDbORM } from '@mikro-o
 
 import { BaseError } from '../../exception/index.js'
 import { PerformanceRecord, type Statistics, StorageType } from '../../types/index.js'
-import { Constants } from '../../utils/index.js'
+import { Constants, ensureError } from '../../utils/index.js'
 import { Storage } from './Storage.js'
 
 export class MikroOrmStorage extends Storage {
@@ -26,7 +26,7 @@ export class MikroOrmStorage extends Storage {
         delete this.orm
       }
     } catch (error) {
-      this.handleDBStorageError(this.storageType, error as Error)
+      this.handleDBStorageError(this.storageType, ensureError(error))
     }
   }
 
@@ -55,7 +55,7 @@ export class MikroOrmStorage extends Storage {
         }
       }
     } catch (error) {
-      this.handleDBStorageError(this.storageType, error as Error)
+      this.handleDBStorageError(this.storageType, ensureError(error))
     }
   }
 
@@ -71,7 +71,7 @@ export class MikroOrmStorage extends Storage {
     } catch (error) {
       this.handleDBStorageError(
         this.storageType,
-        error as Error,
+        ensureError(error),
         Constants.PERFORMANCE_RECORDS_TABLE
       )
     }

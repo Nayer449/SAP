@@ -7,6 +7,7 @@ import { isAsyncFunction } from './Utils.js'
 export enum AsyncLockType {
   configuration = 'configuration',
   performance = 'performance',
+  simulatorState = 'simulatorState',
 }
 
 type ResolveType = (value: PromiseLike<void> | void) => void
@@ -21,13 +22,16 @@ export class AsyncLock {
     this.resolveQueue = new Queue<ResolveType>()
   }
 
-  public static async runExclusive<T>(type: AsyncLockType, fn: () => Promise<T> | T): Promise<T> {
+  public static async runExclusive<T>(
+    type: AsyncLockType,
+    fn: (() => Promise<T>) | (() => T)
+  ): Promise<T> {
     try {
       await AsyncLock.acquire(type)
       if (isAsyncFunction(fn)) {
         return await fn()
       } else {
-        return fn() as T
+        return fn()
       }
     } finally {
       AsyncLock.release(type)
@@ -46,11 +50,12 @@ export class AsyncLock {
   }
 
   private static getAsyncLock (type: AsyncLockType): AsyncLock {
-    if (!AsyncLock.asyncLocks.has(type)) {
-      AsyncLock.asyncLocks.set(type, new AsyncLock())
+    let asyncLock = AsyncLock.asyncLocks.get(type)
+    if (asyncLock == null) {
+      asyncLock = new AsyncLock()
+      AsyncLock.asyncLocks.set(type, asyncLock)
     }
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    return AsyncLock.asyncLocks.get(type)!
+    return asyncLock
   }
 
   private static release (type: AsyncLockType): void {

@@ -31,12 +31,14 @@ import type {
   OCPP20GetBaseReportResponse,
   OCPP20GetInstalledCertificateIdsRequest,
   OCPP20GetInstalledCertificateIdsResponse,
+  OCPP20GetLocalListVersionResponse,
   OCPP20GetLogRequest,
   OCPP20GetLogResponse,
   OCPP20GetTransactionStatusRequest,
   OCPP20GetTransactionStatusResponse,
   OCPP20GetVariablesRequest,
   OCPP20GetVariablesResponse,
+  OCPP20IdTokenType,
   OCPP20InstallCertificateRequest,
   OCPP20InstallCertificateResponse,
   OCPP20RequestStartTransactionRequest,
@@ -45,6 +47,8 @@ import type {
   OCPP20RequestStopTransactionResponse,
   OCPP20ResetRequest,
   OCPP20ResetResponse,
+  OCPP20SendLocalListRequest,
+  OCPP20SendLocalListResponse,
   OCPP20SetNetworkProfileRequest,
   OCPP20SetNetworkProfileResponse,
   OCPP20SetVariablesRequest,
@@ -144,6 +148,10 @@ export interface TestableOCPP20IncomingRequestService {
     commandPayload: OCPP20GetInstalledCertificateIdsRequest
   ) => Promise<OCPP20GetInstalledCertificateIdsResponse>
 
+  handleRequestGetLocalListVersion: (
+    chargingStation: ChargingStation
+  ) => OCPP20GetLocalListVersionResponse
+
   /**
    * Handles OCPP 2.0.1 GetLog request from central system.
    * Accepts log upload and simulates upload lifecycle.
@@ -189,6 +197,11 @@ export interface TestableOCPP20IncomingRequestService {
     commandPayload: OCPP20ResetRequest
   ) => Promise<OCPP20ResetResponse>
 
+  handleRequestSendLocalList: (
+    chargingStation: ChargingStation,
+    commandPayload: OCPP20SendLocalListRequest
+  ) => OCPP20SendLocalListResponse
+
   /**
    * Handles OCPP 2.0.1 SetNetworkProfile request from central system.
    * Per TC_B_43_CS: CS must respond to SetNetworkProfile at minimum with Rejected.
@@ -218,12 +231,12 @@ export interface TestableOCPP20IncomingRequestService {
 
   /**
    * Handles OCPP 2.0 RequestStopTransaction request from central system.
-   * Stops an ongoing transaction on the charging station.
+   * Validates and returns Accepted/Rejected. Actual stop is performed by event listener.
    */
   handleRequestStopTransaction: (
     chargingStation: ChargingStation,
     commandPayload: OCPP20RequestStopTransactionRequest
-  ) => Promise<OCPP20RequestStopTransactionResponse>
+  ) => OCPP20RequestStopTransactionResponse
 
   handleRequestTriggerMessage: (
     chargingStation: ChargingStation,
@@ -239,6 +252,13 @@ export interface TestableOCPP20IncomingRequestService {
     chargingStation: ChargingStation,
     commandPayload: OCPP20UpdateFirmwareRequest
   ) => OCPP20UpdateFirmwareResponse
+
+  isAuthorizedToStopTransaction: (
+    chargingStation: ChargingStation,
+    connectorId: number,
+    presentedIdToken: OCPP20IdTokenType,
+    presentedGroupIdToken?: OCPP20IdTokenType
+  ) => boolean
 }
 
 /**
@@ -263,8 +283,7 @@ export function createTestableIncomingRequestService (
   const serviceImpl = service as unknown as TestableOCPP20IncomingRequestService
 
   return {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
-    buildReportData: (serviceImpl as any).buildReportData.bind(service),
+    buildReportData: serviceImpl.buildReportData.bind(service),
     handleRequestCertificateSigned: serviceImpl.handleRequestCertificateSigned.bind(service),
     handleRequestChangeAvailability: serviceImpl.handleRequestChangeAvailability.bind(service),
     handleRequestClearCache: serviceImpl.handleRequestClearCache.bind(service),
@@ -274,11 +293,13 @@ export function createTestableIncomingRequestService (
     handleRequestGetBaseReport: serviceImpl.handleRequestGetBaseReport.bind(service),
     handleRequestGetInstalledCertificateIds:
       serviceImpl.handleRequestGetInstalledCertificateIds.bind(service),
+    handleRequestGetLocalListVersion: serviceImpl.handleRequestGetLocalListVersion.bind(service),
     handleRequestGetLog: serviceImpl.handleRequestGetLog.bind(service),
     handleRequestGetTransactionStatus: serviceImpl.handleRequestGetTransactionStatus.bind(service),
     handleRequestGetVariables: serviceImpl.handleRequestGetVariables.bind(service),
     handleRequestInstallCertificate: serviceImpl.handleRequestInstallCertificate.bind(service),
     handleRequestReset: serviceImpl.handleRequestReset.bind(service),
+    handleRequestSendLocalList: serviceImpl.handleRequestSendLocalList.bind(service),
     handleRequestSetNetworkProfile: serviceImpl.handleRequestSetNetworkProfile.bind(service),
     handleRequestSetVariables: serviceImpl.handleRequestSetVariables.bind(service),
     handleRequestStartTransaction: serviceImpl.handleRequestStartTransaction.bind(service),
@@ -286,6 +307,7 @@ export function createTestableIncomingRequestService (
     handleRequestTriggerMessage: serviceImpl.handleRequestTriggerMessage.bind(service),
     handleRequestUnlockConnector: serviceImpl.handleRequestUnlockConnector.bind(service),
     handleRequestUpdateFirmware: serviceImpl.handleRequestUpdateFirmware.bind(service),
+    isAuthorizedToStopTransaction: serviceImpl.isAuthorizedToStopTransaction.bind(service),
   }
 }
 

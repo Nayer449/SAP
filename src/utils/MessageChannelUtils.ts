@@ -4,16 +4,16 @@ import type { ChargingStation } from '../charging-station/index.js'
 
 import {
   type ChargingStationData,
+  type ChargingStationInfo,
   type ChargingStationWorkerMessage,
   ChargingStationWorkerMessageEvents,
   type Statistics,
   type TimestampedData,
 } from '../types/index.js'
 import {
-  buildChargingStationAutomaticTransactionGeneratorConfiguration,
-  buildConnectorsStatus,
-  buildEvsesStatus,
-  OutputFormat,
+  buildATGEntries,
+  buildConnectorEntries,
+  buildEvseEntries,
 } from './ChargingStationConfigurationUtils.js'
 
 const buildChargingStationWorkerMessage = (
@@ -98,19 +98,20 @@ export const buildPerformanceStatisticsMessage = (
 const buildChargingStationDataPayload = (chargingStation: ChargingStation): ChargingStationData => {
   return {
     bootNotificationResponse: chargingStation.bootNotificationResponse,
-    connectors: buildConnectorsStatus(chargingStation),
-    evses: buildEvsesStatus(chargingStation, OutputFormat.worker),
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    ocppConfiguration: chargingStation.ocppConfiguration!,
+    connectors: buildConnectorEntries(chargingStation),
+    evses: buildEvseEntries(chargingStation),
+    ocppConfiguration: chargingStation.ocppConfiguration ?? {},
     started: chargingStation.started,
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    stationInfo: chargingStation.stationInfo!,
+    stationInfo: chargingStation.stationInfo ?? ({} as ChargingStationInfo),
     supervisionUrl: chargingStation.wsConnectionUrl.href,
     timestamp: Date.now(),
     wsState: chargingStation.wsConnection?.readyState,
     ...(chargingStation.automaticTransactionGenerator != null && {
-      automaticTransactionGenerator:
-        buildChargingStationAutomaticTransactionGeneratorConfiguration(chargingStation),
+      automaticTransactionGenerator: {
+        automaticTransactionGenerator:
+          chargingStation.getAutomaticTransactionGeneratorConfiguration(),
+        automaticTransactionGeneratorStatuses: buildATGEntries(chargingStation),
+      },
     }),
   }
 }

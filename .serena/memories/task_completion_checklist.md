@@ -1,44 +1,45 @@
 # Task Completion Checklist
 
-## After Completing Any Task
+Run quality gates for each sub-project affected by your changes. See `suggested_commands` for full command reference.
 
-### 1. Code Quality Checks
+## Quality Gate Order
 
-- [ ] Run `pnpm format` to format code, fix autofixable issues and check for remaining linting issues
-- [ ] Ensure TypeScript compilation passes (part of build process)
+For each sub-project: `pnpm format` → `pnpm typecheck` → `pnpm lint` → `pnpm build` (if applicable) → `pnpm test`
 
-### 2. Testing
+### 1. Root Simulator (if `src/` or `tests/` changed)
 
-- [ ] Run `pnpm test` to ensure all tests pass
-- [ ] If new functionality added, ensure appropriate tests are included
-- [ ] Check test coverage if relevant: `pnpm test:coverage`
+`pnpm format && pnpm typecheck && pnpm lint && pnpm build && pnpm test`
 
-### 3. Build Verification
+### 2. UI Common (if `ui/common/` changed)
 
-- [ ] Run `pnpm build` to ensure production build succeeds
-- [ ] For development changes, verify `pnpm build:dev` works
+`cd ui/common && pnpm format && pnpm typecheck && pnpm lint && pnpm test`
 
-### 4. Documentation
+Note: `pnpm build` is identical to `pnpm typecheck` (source-only package, no build artifacts).
 
-- [ ] Update relevant documentation if public API changed
-- [ ] Ensure commit messages follow Conventional Commits format
+### 3. CLI (if `ui/cli/` changed)
 
-### 5. OCPP Compliance (if applicable)
+`cd ui/cli && pnpm format && pnpm typecheck && pnpm lint && pnpm build && pnpm test`
 
-- [ ] Verify OCPP standard compliance
-- [ ] Check that new OCPP commands/responses follow specification exactly
-- [ ] Validate against JSON schemas when `ocppStrictCompliance` is enabled
+### 4. Web UI (if `ui/web/` changed)
 
-## Git Workflow
+`cd ui/web && pnpm format && pnpm typecheck && pnpm lint && pnpm build && pnpm test:coverage`
 
-- Use Conventional Commits format for commit messages
-- Branch from `main` for new features
-- Ensure all quality gates pass before merging
+Note: Use `test:coverage` (single-run). `pnpm test` starts Vitest in watch mode locally.
 
-## Pre-commit Hooks
+### 5. OCPP Mock Server (if `tests/ocpp-server/` changed)
 
-The project uses husky for pre-commit hooks that automatically:
+`cd tests/ocpp-server && poetry run task format && poetry run task typecheck && poetry run task lint && poetry run task test`
 
-- Run linting
-- Run formatting
-- Validate commit messages
+### 6. Documentation
+
+- Update relevant README if user-facing behavior changed (root `README.md`, `ui/cli/README.md`, `ui/web/README.md`)
+- Commit messages follow Conventional Commits (enforced by hook)
+
+### 7. OCPP Compliance (if applicable)
+
+- Verify OCPP standard compliance for protocol changes
+- Validate against JSON schemas when `ocppStrictCompliance` is enabled
+
+### Dependency Order
+
+If changing `ui/common`: run common gates first, then rebuild/test CLI and Web UI (they depend on it).

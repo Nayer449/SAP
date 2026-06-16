@@ -13,12 +13,13 @@ import type {
   SetChargingProfileRequest,
 } from '../../../../src/types/index.js'
 
-import { GenericStatus, OCPP16StandardParametersKey } from '../../../../src/types/index.js'
-import { OCPP16ChargingProfilePurposeType } from '../../../../src/types/ocpp/1.6/ChargingProfile.js'
 import {
+  GenericStatus,
+  OCPP16ChargingProfilePurposeType,
   OCPP16ChargingProfileStatus,
   OCPP16ClearChargingProfileStatus,
-} from '../../../../src/types/ocpp/1.6/Responses.js'
+  OCPP16StandardParametersKey,
+} from '../../../../src/types/index.js'
 import { standardCleanup } from '../../../helpers/TestLifecycleHelpers.js'
 import {
   ChargingProfileFixtures,
@@ -212,7 +213,7 @@ await describe('OCPP16IncomingRequestService — SmartCharging', async () => {
         'Core,SmartCharging'
       )
       // Ensure no profiles on any connector
-      for (const [connectorId] of station.connectors.entries()) {
+      for (const { connectorId } of station.iterateConnectors()) {
         const connectorStatus = station.getConnectorStatus(connectorId)
         if (connectorStatus != null) {
           connectorStatus.chargingProfiles = []

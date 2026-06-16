@@ -1,5 +1,5 @@
 /**
- * @file ChargingStation Integration Tests
+ * @file Tests for ChargingStation integration
  * @description Integration test suite that verifies all ChargingStation test modules work together.
  *
  * Related domain-specific test files:
@@ -11,7 +11,7 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 
-import type { ChargingStation } from '../../src/charging-station/ChargingStation.js'
+import type { ChargingStation } from '../../src/charging-station/index.js'
 
 import { RegistrationStatusEnumType } from '../../src/types/index.js'
 import { standardCleanup } from '../helpers/TestLifecycleHelpers.js'
@@ -21,14 +21,9 @@ import {
   TEST_TRANSACTION_ENERGY_WH,
   TEST_TRANSACTION_ID,
 } from './ChargingStationTestConstants.js'
-import {
-  cleanupChargingStation,
-  createMockChargingStation,
-  MockIdTagsCache,
-  MockSharedLRUCache,
-  MockWebSocket,
-  WebSocketReadyState,
-} from './ChargingStationTestUtils.js'
+import { cleanupChargingStation, createMockChargingStation } from './helpers/StationHelpers.js'
+import { MockIdTagsCache, MockSharedLRUCache } from './mocks/MockCaches.js'
+import { MockWebSocket, WebSocketReadyState } from './mocks/MockWebSocket.js'
 
 await describe('ChargingStation', async () => {
   await describe('Test Utilities', async () => {
@@ -40,7 +35,7 @@ await describe('ChargingStation', async () => {
       const station = result.station
 
       assert.notStrictEqual(station, undefined)
-      assert.ok(station.connectors.size > 0)
+      assert.strictEqual(station.getNumberOfConnectors() > 0, true)
       assert.notStrictEqual(station.stationInfo, undefined)
 
       cleanupChargingStation(station)
@@ -50,8 +45,8 @@ await describe('ChargingStation', async () => {
       const result = createMockChargingStation({ connectorsCount: 5 })
       const station = result.station
 
-      // 5 connectors + connector 0 = 6 total
-      assert.strictEqual(station.connectors.size, 6)
+      // 5 connectors (excluding connector 0)
+      assert.strictEqual(station.getNumberOfConnectors(), 5)
       assert.strictEqual(station.hasConnector(5), true)
 
       cleanupChargingStation(station)

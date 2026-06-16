@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, it } from 'node:test'
 
 import type {
   AuthCache,
-  LocalAuthEntry,
   LocalAuthListManager,
 } from '../../../../../src/charging-station/ocpp/auth/interfaces/OCPPAuthService.js'
 
@@ -18,7 +17,6 @@ import {
   AuthorizationStatus,
   IdentifierType,
 } from '../../../../../src/charging-station/ocpp/auth/types/AuthTypes.js'
-import { OCPPVersion } from '../../../../../src/types/ocpp/OCPPVersion.js'
 import { standardCleanup } from '../../../../helpers/TestLifecycleHelpers.js'
 import {
   createMockAuthCache,
@@ -72,7 +70,7 @@ await describe('LocalAuthStrategy', async () => {
     await it('should return true when local auth list is enabled', () => {
       const config = createTestAuthConfig({ localAuthListEnabled: true })
       const request = createMockAuthRequest({
-        identifier: createMockIdentifier(OCPPVersion.VERSION_16, 'TEST_TAG', IdentifierType.ID_TAG),
+        identifier: createMockIdentifier('TEST_TAG', IdentifierType.ID_TAG),
       })
       assert.strictEqual(strategy.canHandle(request, config), true)
     })
@@ -80,7 +78,7 @@ await describe('LocalAuthStrategy', async () => {
     await it('should return true when cache is enabled', () => {
       const config = createTestAuthConfig({ authorizationCacheEnabled: true })
       const request = createMockAuthRequest({
-        identifier: createMockIdentifier(OCPPVersion.VERSION_16, 'TEST_TAG', IdentifierType.ID_TAG),
+        identifier: createMockIdentifier('TEST_TAG', IdentifierType.ID_TAG),
       })
       assert.strictEqual(strategy.canHandle(request, config), true)
     })
@@ -88,7 +86,7 @@ await describe('LocalAuthStrategy', async () => {
     await it('should return false when nothing is enabled', () => {
       const config = createTestAuthConfig()
       const request = createMockAuthRequest({
-        identifier: createMockIdentifier(OCPPVersion.VERSION_16, 'TEST_TAG', IdentifierType.ID_TAG),
+        identifier: createMockIdentifier('TEST_TAG', IdentifierType.ID_TAG),
       })
       assert.strictEqual(strategy.canHandle(request, config), false)
     })
@@ -104,37 +102,30 @@ await describe('LocalAuthStrategy', async () => {
       strategy.initialize(config)
     })
 
-    await it('should authenticate using local auth list', async () => {
-      mockLocalAuthListManager.getEntry = () =>
-        new Promise<LocalAuthEntry | undefined>(resolve => {
-          resolve({
-            expiryDate: new Date(Date.now() + 86400000),
-            identifier: 'LOCAL_TAG',
-            metadata: { source: 'local' },
-            status: 'accepted',
-          })
-        })
+    await it('should authenticate using local auth list', () => {
+      mockLocalAuthListManager.getEntry = () => ({
+        expiryDate: new Date(Date.now() + 86400000),
+        identifier: 'LOCAL_TAG',
+        metadata: { source: 'local' },
+        status: 'accepted',
+      })
 
       const config = createTestAuthConfig({
         authorizationCacheEnabled: true,
         localAuthListEnabled: true,
       })
       const request = createMockAuthRequest({
-        identifier: createMockIdentifier(
-          OCPPVersion.VERSION_16,
-          'LOCAL_TAG',
-          IdentifierType.ID_TAG
-        ),
+        identifier: createMockIdentifier('LOCAL_TAG', IdentifierType.ID_TAG),
       })
 
-      const result = await strategy.authenticate(request, config)
+      const result = strategy.authenticate(request, config)
 
       assert.notStrictEqual(result, undefined)
       assert.strictEqual(result?.status, AuthorizationStatus.ACCEPTED)
       assert.strictEqual(result.method, AuthenticationMethod.LOCAL_LIST)
     })
 
-    await it('should authenticate using cache', async () => {
+    await it('should authenticate using cache', () => {
       mockAuthCache.get = () =>
         createMockAuthorizationResult({
           cacheTtl: 300,
@@ -144,33 +135,25 @@ await describe('LocalAuthStrategy', async () => {
 
       const config = createTestAuthConfig({ authorizationCacheEnabled: true })
       const request = createMockAuthRequest({
-        identifier: createMockIdentifier(
-          OCPPVersion.VERSION_16,
-          'CACHED_TAG',
-          IdentifierType.ID_TAG
-        ),
+        identifier: createMockIdentifier('CACHED_TAG', IdentifierType.ID_TAG),
       })
 
-      const result = await strategy.authenticate(request, config)
+      const result = strategy.authenticate(request, config)
 
       assert.notStrictEqual(result, undefined)
       assert.strictEqual(result?.status, AuthorizationStatus.ACCEPTED)
       assert.strictEqual(result.method, AuthenticationMethod.CACHE)
     })
 
-    await it('should use offline fallback for transaction stop', async () => {
+    await it('should use offline fallback for transaction stop', () => {
       const config = createTestAuthConfig({ offlineAuthorizationEnabled: true })
       const request = createMockAuthRequest({
         allowOffline: true,
         context: AuthContext.TRANSACTION_STOP,
-        identifier: createMockIdentifier(
-          OCPPVersion.VERSION_16,
-          'UNKNOWN_TAG',
-          IdentifierType.ID_TAG
-        ),
+        identifier: createMockIdentifier('UNKNOWN_TAG', IdentifierType.ID_TAG),
       })
 
-      const result = await strategy.authenticate(request, config)
+      const result = strategy.authenticate(request, config)
 
       assert.notStrictEqual(result, undefined)
       assert.strictEqual(result?.status, AuthorizationStatus.ACCEPTED)
@@ -178,17 +161,13 @@ await describe('LocalAuthStrategy', async () => {
       assert.strictEqual(result.isOffline, true)
     })
 
-    await it('should return undefined when no local auth available', async () => {
+    await it('should return undefined when no local auth available', () => {
       const config = createTestAuthConfig()
       const request = createMockAuthRequest({
-        identifier: createMockIdentifier(
-          OCPPVersion.VERSION_16,
-          'UNKNOWN_TAG',
-          IdentifierType.ID_TAG
-        ),
+        identifier: createMockIdentifier('UNKNOWN_TAG', IdentifierType.ID_TAG),
       })
 
-      const result = await strategy.authenticate(request, config)
+      const result = strategy.authenticate(request, config)
       assert.strictEqual(result, undefined)
     })
   })
@@ -236,25 +215,19 @@ await describe('LocalAuthStrategy', async () => {
   })
 
   await describe('isInLocalList', async () => {
-    await it('should return true when identifier is in local list', async () => {
-      mockLocalAuthListManager.getEntry = () =>
-        new Promise<LocalAuthEntry | undefined>(resolve => {
-          resolve({
-            identifier: 'LOCAL_TAG',
-            status: 'accepted',
-          })
-        })
+    await it('should return true when identifier is in local list', () => {
+      mockLocalAuthListManager.getEntry = () => ({
+        identifier: 'LOCAL_TAG',
+        status: 'accepted',
+      })
 
-      assert.strictEqual(await strategy.isInLocalList('LOCAL_TAG'), true)
+      assert.strictEqual(strategy.isInLocalList('LOCAL_TAG'), true)
     })
 
-    await it('should return false when identifier is not in local list', async () => {
-      mockLocalAuthListManager.getEntry = () =>
-        new Promise<LocalAuthEntry | undefined>(resolve => {
-          resolve(undefined)
-        })
+    await it('should return false when identifier is not in local list', () => {
+      mockLocalAuthListManager.getEntry = () => undefined
 
-      assert.strictEqual(await strategy.isInLocalList('UNKNOWN_TAG'), false)
+      assert.strictEqual(strategy.isInLocalList('UNKNOWN_TAG'), false)
     })
   })
 

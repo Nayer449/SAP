@@ -1,35 +1,38 @@
+import type {
+  AdditionalInfoType,
+  JsonObject,
+  OCPP20AuthorizeRequest,
+  OCPP20AuthorizeResponse,
+  RequestStartStopStatusEnumType,
+} from '../../../../types/index.js'
 import type { ChargingStation } from '../../../index.js'
 import type { OCPPAuthAdapter } from '../interfaces/OCPPAuthService.js'
 import type {
   AuthConfiguration,
   AuthorizationResult,
   AuthRequest,
-  UnifiedIdentifier,
+  Identifier,
 } from '../types/AuthTypes.js'
 
 import { OCPP20ServiceUtils } from '../../2.0/OCPP20ServiceUtils.js'
-import { OCPP20VariableManager } from '../../2.0/OCPP20VariableManager.js'
 import {
-  GetVariableStatusEnumType,
-  type OCPP20IdTokenType,
-  RequestStartStopStatusEnumType,
-} from '../../../../types/index.js'
-import {
-  type AdditionalInfoType,
-  OCPP20AuthorizationStatusEnumType,
+  OCPP20ComponentName,
   OCPP20IdTokenEnumType,
-  OCPP20TransactionEventEnumType,
-  type OCPP20TransactionEventResponse,
-  OCPP20TriggerReasonEnumType,
-} from '../../../../types/ocpp/2.0/Transaction.js'
-import { OCPPVersion } from '../../../../types/ocpp/OCPPVersion.js'
-import { logger } from '../../../../utils/index.js'
+  type OCPP20IdTokenType,
+  OCPP20RequestCommand,
+  OCPP20RequiredVariableName,
+  OCPPVersion,
+} from '../../../../types/index.js'
+import { getErrorMessage, isEmpty, logger, truncateId } from '../../../../utils/index.js'
 import {
   AuthContext,
   AuthenticationMethod,
   AuthorizationStatus,
   IdentifierType,
+  mapOCPP20AuthorizationStatus,
+  mapOCPP20TokenType,
   mapToOCPP20Status,
+  mapToOCPP20TokenType,
 } from '../types/AuthTypes.js'
 
 const moduleName = 'OCPP20AuthAdapter'
@@ -38,28 +41,22 @@ const moduleName = 'OCPP20AuthAdapter'
  * OCPP 2.0 Authentication Adapter
  *
  * Handles authentication for OCPP 2.0/2.1 charging stations by translating
- * between unified auth types and OCPP 2.0 specific types and protocols.
- *
- * Note: OCPP 2.0 doesn't have a dedicated Authorize message. Authorization
- * happens through TransactionEvent messages and local configuration.
+ * between auth types and OCPP 2.0 specific types and protocols.
  */
-export class OCPP20AuthAdapter implements OCPPAuthAdapter {
-  readonly ocppVersion = OCPPVersion.VERSION_20
+export class OCPP20AuthAdapter implements OCPPAuthAdapter<OCPP20IdTokenType> {
+  readonly ocppVersion = OCPPVersion.VERSION_201
 
   constructor (private readonly chargingStation: ChargingStation) {}
 
   /**
-   * Perform remote authorization using OCPP 2.0 mechanisms
-   *
-   * Since OCPP 2.0 doesn't have Authorize, we simulate authorization
-   * by checking if we can start a transaction with the identifier
-   * @param identifier - Unified identifier containing the IdToken to authorize
+   * Perform remote authorization using OCPP 2.0 Authorize request.
+   * @param identifier - Identifier containing the IdToken to authorize
    * @param connectorId - EVSE/connector ID for the authorization context
    * @param transactionId - Optional existing transaction ID for ongoing transactions
    * @returns Authorization result with status, method, and OCPP 2.0 specific metadata
    */
   async authorizeRemote (
-    identifier: UnifiedIdentifier,
+    identifier: Identifier,
     connectorId?: number,
     transactionId?: number | string
   ): Promise<AuthorizationResult> {
@@ -67,10 +64,9 @@ export class OCPP20AuthAdapter implements OCPPAuthAdapter {
 
     try {
       logger.debug(
-        `${this.chargingStation.logPrefix()} ${moduleName}.${methodName}: Authorizing identifier ${identifier.value} via OCPP 2.0 TransactionEvent`
+        `${this.chargingStation.logPrefix()} ${moduleName}.${methodName}: Authorizing identifier '${truncateId(identifier.value)}' via OCPP 2.0 Authorize`
       )
 
-      // Check if remote authorization is configured
       const isRemoteAuth = this.isRemoteAvailable()
       if (!isRemoteAuth) {
         return {
@@ -86,14 +82,15 @@ export class OCPP20AuthAdapter implements OCPPAuthAdapter {
         }
       }
 
-      // Validate inputs
-      if (connectorId == null) {
-        logger.warn(
-          `${this.chargingStation.logPrefix()} ${moduleName}.${methodName}: No connector specified for authorization`
-        )
+      const idToken = this.convertFromIdentifier(identifier)
+
+      const isValidToken = this.isValidIdentifier(identifier)
+      if (!isValidToken) {
         return {
           additionalInfo: {
-            error: 'Connector ID is required for OCPP 2.0 authorization',
+            connectorId,
+            error: 'Invalid token format for OCPP 2.0',
+            transactionId,
           },
           isOffline: false,
           method: AuthenticationMethod.REMOTE_AUTHORIZATION,
@@ -102,111 +99,39 @@ export class OCPP20AuthAdapter implements OCPPAuthAdapter {
         }
       }
 
-      try {
-        const idToken = this.convertFromUnifiedIdentifier(identifier)
+      logger.debug(
+        `${this.chargingStation.logPrefix()} ${moduleName}.${methodName}: Sending Authorize request (idToken: ${idToken.idToken})`
+      )
 
-        // Validate token format
-        const isValidToken = this.isValidIdentifier(identifier)
-        if (!isValidToken) {
-          return {
-            additionalInfo: {
-              connectorId,
-              error: 'Invalid token format for OCPP 2.0',
-              transactionId,
-            },
-            isOffline: false,
-            method: AuthenticationMethod.REMOTE_AUTHORIZATION,
-            status: AuthorizationStatus.INVALID,
-            timestamp: new Date(),
-          }
-        }
+      const response = await this.chargingStation.ocppRequestService.requestHandler<
+        OCPP20AuthorizeRequest,
+        OCPP20AuthorizeResponse
+      >(this.chargingStation, OCPP20RequestCommand.AUTHORIZE, {
+        idToken,
+      })
 
-        // OCPP 2.0: Authorization through TransactionEvent
-        // According to OCPP 2.0.1 spec section G03 - Authorization
-        const tempTransactionId =
-          transactionId != null ? transactionId.toString() : `auth-${Date.now().toString()}`
+      const authStatus = response.idTokenInfo.status
+      const cacheExpiryDateTime = response.idTokenInfo.cacheExpiryDateTime
 
-        // Get EVSE ID from connector
-        const evseId = connectorId // In OCPP 2.0, connector maps to EVSE
+      const mappedStatus = mapOCPP20AuthorizationStatus(authStatus)
 
-        logger.debug(
-          `${this.chargingStation.logPrefix()} ${moduleName}.${methodName}: Sending TransactionEvent for authorization (evseId: ${evseId.toString()}, idToken: ${idToken.idToken})`
-        )
+      logger.debug(
+        `${this.chargingStation.logPrefix()} ${moduleName}.${methodName}: Authorization result for ${idToken.idToken}: ${authStatus} (mapped: ${mappedStatus})`
+      )
 
-        // Send TransactionEvent with idToken to request authorization
-        const response: OCPP20TransactionEventResponse =
-          await OCPP20ServiceUtils.sendTransactionEvent(
-            this.chargingStation,
-            OCPP20TransactionEventEnumType.Started,
-            OCPP20TriggerReasonEnumType.Authorized,
-            connectorId,
-            tempTransactionId,
-            {
-              evseId,
-              idToken,
-            }
-          )
-
-        // Extract authorization status from response
-        const authStatus = response.idTokenInfo?.status
-        const cacheExpiryDateTime = response.idTokenInfo?.cacheExpiryDateTime
-
-        if (authStatus == null) {
-          logger.warn(
-            `${this.chargingStation.logPrefix()} ${moduleName}.${methodName}: No idTokenInfo in TransactionEvent response, treating as Unknown`
-          )
-          return {
-            additionalInfo: {
-              connectorId,
-              note: 'No authorization status in response',
-              transactionId: tempTransactionId,
-            },
-            isOffline: false,
-            method: AuthenticationMethod.REMOTE_AUTHORIZATION,
-            status: AuthorizationStatus.UNKNOWN,
-            timestamp: new Date(),
-          }
-        }
-
-        // Map OCPP 2.0 authorization status to unified status
-        const unifiedStatus = this.mapOCPP20AuthStatus(authStatus)
-
-        logger.info(
-          `${this.chargingStation.logPrefix()} ${moduleName}.${methodName}: Authorization result for ${idToken.idToken}: ${authStatus} (unified: ${unifiedStatus})`
-        )
-
-        return {
-          additionalInfo: {
-            cacheExpiryDateTime,
-            chargingPriority: response.idTokenInfo?.chargingPriority,
-            connectorId,
-            ocpp20Status: authStatus,
-            tokenType: idToken.type,
-            tokenValue: idToken.idToken,
-            transactionId: tempTransactionId,
-          },
-          isOffline: false,
-          method: AuthenticationMethod.REMOTE_AUTHORIZATION,
-          status: unifiedStatus,
-          timestamp: new Date(),
-        }
-      } catch (error) {
-        logger.error(
-          `${this.chargingStation.logPrefix()} ${moduleName}.${methodName}: TransactionEvent authorization failed`,
-          error
-        )
-
-        return {
-          additionalInfo: {
-            connectorId,
-            error: error instanceof Error ? error.message : 'Unknown error',
-            transactionId,
-          },
-          isOffline: false,
-          method: AuthenticationMethod.REMOTE_AUTHORIZATION,
-          status: AuthorizationStatus.INVALID,
-          timestamp: new Date(),
-        }
+      return {
+        additionalInfo: {
+          cacheExpiryDateTime,
+          chargingPriority: response.idTokenInfo.chargingPriority,
+          connectorId,
+          ocpp20Status: authStatus,
+          tokenType: idToken.type,
+          tokenValue: idToken.idToken,
+        },
+        isOffline: false,
+        method: AuthenticationMethod.REMOTE_AUTHORIZATION,
+        status: mappedStatus,
+        timestamp: new Date(),
       }
     } catch (error) {
       logger.error(
@@ -217,7 +142,7 @@ export class OCPP20AuthAdapter implements OCPPAuthAdapter {
       return {
         additionalInfo: {
           connectorId,
-          error: error instanceof Error ? error.message : 'Unknown error',
+          error: getErrorMessage(error),
           transactionId,
         },
         isOffline: false,
@@ -229,15 +154,15 @@ export class OCPP20AuthAdapter implements OCPPAuthAdapter {
   }
 
   /**
-   * Convert unified identifier to OCPP 2.0 IdToken
-   * @param identifier - Unified identifier to convert to OCPP 2.0 format
+   * Convert identifier to OCPP 2.0 IdToken
+   * @param identifier - Identifier to convert to OCPP 2.0 format
    * @returns OCPP 2.0 IdTokenType with mapped type and additionalInfo
    */
-  convertFromUnifiedIdentifier (identifier: UnifiedIdentifier): OCPP20IdTokenType {
-    // Map unified type back to OCPP 2.0 type
-    const ocpp20Type = this.mapFromUnifiedIdentifierType(identifier.type)
+  convertFromIdentifier (identifier: Identifier): OCPP20IdTokenType {
+    // Map type back to OCPP 2.0 type
+    const ocpp20Type = mapToOCPP20TokenType(identifier.type)
 
-    // Convert unified additionalInfo back to OCPP 2.0 format
+    // Convert additionalInfo back to OCPP 2.0 format
     const additionalInfo: AdditionalInfoType[] | undefined = identifier.additionalInfo
       ? Object.entries(identifier.additionalInfo)
         .filter(([key]) => key.startsWith('info_'))
@@ -249,7 +174,7 @@ export class OCPP20AuthAdapter implements OCPPAuthAdapter {
             return {
               additionalIdToken: value,
               type: 'string',
-            } as AdditionalInfoType
+            }
           }
         })
       : undefined
@@ -262,24 +187,15 @@ export class OCPP20AuthAdapter implements OCPPAuthAdapter {
   }
 
   /**
-   * Convert unified authorization result to OCPP 2.0 response format
-   * @param result - Unified authorization result to convert
-   * @returns OCPP 2.0 RequestStartStopStatusEnumType for transaction responses
-   */
-  convertToOCPP20Response (result: AuthorizationResult): RequestStartStopStatusEnumType {
-    return mapToOCPP20Status(result.status)
-  }
-
-  /**
-   * Convert OCPP 2.0 IdToken to unified identifier
+   * Convert OCPP 2.0 IdToken to identifier
    * @param identifier - OCPP 2.0 IdToken or raw string identifier
-   * @param additionalData - Optional metadata to include in the unified identifier
-   * @returns Unified identifier with normalized type and OCPP version metadata
+   * @param additionalData - Optional metadata to include in the identifier
+   * @returns Identifier with normalized type and metadata
    */
-  convertToUnifiedIdentifier (
+  convertToIdentifier (
     identifier: OCPP20IdTokenType | string,
     additionalData?: Record<string, unknown>
-  ): UnifiedIdentifier {
+  ): Identifier {
     let idToken: OCPP20IdTokenType
 
     // Handle both string and object formats
@@ -293,8 +209,7 @@ export class OCPP20AuthAdapter implements OCPPAuthAdapter {
       idToken = identifier
     }
 
-    // Map OCPP 2.0 IdToken type to unified type
-    const unifiedType = this.mapToUnifiedIdentifierType(idToken.type)
+    const identifierType = mapOCPP20TokenType(idToken.type)
 
     return {
       additionalInfo: {
@@ -311,11 +226,19 @@ export class OCPP20AuthAdapter implements OCPPAuthAdapter {
           ? Object.fromEntries(Object.entries(additionalData).map(([k, v]) => [k, String(v)]))
           : {}),
       },
-      ocppVersion: OCPPVersion.VERSION_20,
       parentId: additionalData?.parentId as string | undefined,
-      type: unifiedType,
+      type: identifierType,
       value: idToken.idToken,
     }
+  }
+
+  /**
+   * Convert authorization result to OCPP 2.0 response format
+   * @param result - Authorization result to convert
+   * @returns OCPP 2.0 RequestStartStopStatusEnumType for transaction responses
+   */
+  convertToOCPP20Response (result: AuthorizationResult): RequestStartStopStatusEnumType {
+    return mapToOCPP20Status(result.status)
   }
 
   /**
@@ -324,7 +247,7 @@ export class OCPP20AuthAdapter implements OCPPAuthAdapter {
    * @param connectorId - Optional EVSE/connector ID for the request
    * @param transactionId - Optional transaction ID for ongoing transactions
    * @param context - Optional context string (e.g., 'start', 'stop', 'remote_start')
-   * @returns AuthRequest with unified identifier, context, and station metadata
+   * @returns AuthRequest with identifier, context, and station metadata
    */
   createAuthRequest (
     idTokenOrString: OCPP20IdTokenType | string,
@@ -332,7 +255,7 @@ export class OCPP20AuthAdapter implements OCPPAuthAdapter {
     transactionId?: string,
     context?: string
   ): AuthRequest {
-    const identifier = this.convertToUnifiedIdentifier(idTokenOrString)
+    const identifier = this.convertToIdentifier(idTokenOrString)
 
     // Map context string to AuthContext enum
     let authContext: AuthContext
@@ -363,7 +286,7 @@ export class OCPP20AuthAdapter implements OCPPAuthAdapter {
       context: authContext,
       identifier,
       metadata: {
-        ocppVersion: OCPPVersion.VERSION_20,
+        ocppVersion: OCPPVersion.VERSION_201,
         stationId: this.chargingStation.stationInfo?.chargingStationId,
       },
       timestamp: new Date(),
@@ -372,10 +295,9 @@ export class OCPP20AuthAdapter implements OCPPAuthAdapter {
   }
 
   /**
-   * Get OCPP 2.0 specific configuration schema
    * @returns Configuration schema object for OCPP 2.0 authorization settings
    */
-  getConfigurationSchema (): Record<string, unknown> {
+  getConfigurationSchema (): JsonObject {
     return {
       properties: {
         authCacheEnabled: {
@@ -415,10 +337,17 @@ export class OCPP20AuthAdapter implements OCPPAuthAdapter {
   }
 
   /**
+   * @returns Always undefined — OCPP 2.0 defines capacity via LocalAuthListCtrlr.Storage (bytes), not entry count
+   */
+  getMaxLocalAuthListEntries (): number | undefined {
+    return undefined
+  }
+
+  /**
    * Get adapter-specific status information
    * @returns Status object containing adapter state and capabilities
    */
-  getStatus (): Record<string, unknown> {
+  getStatus (): JsonObject {
     return {
       isOnline: this.chargingStation.inAcceptedState(),
       localAuthEnabled: true, // Configuration dependent
@@ -443,20 +372,17 @@ export class OCPP20AuthAdapter implements OCPPAuthAdapter {
    */
   isRemoteAvailable (): boolean {
     try {
-      // Check if station supports remote authorization via variables
-      // OCPP 2.0 uses variables instead of configuration keys
-
-      // Check if station is online and can communicate
       const isOnline = this.chargingStation.inAcceptedState()
-
-      // Check AuthorizeRemoteStart variable (with type validation)
-      const remoteStartValue = this.getVariableValue('AuthCtrlr', 'AuthorizeRemoteStart')
-      const remoteStartEnabled = this.parseBooleanVariable(remoteStartValue, true)
-
+      const remoteStartEnabled = OCPP20ServiceUtils.readVariableAsBoolean(
+        this.chargingStation,
+        OCPP20ComponentName.AuthCtrlr,
+        OCPP20RequiredVariableName.AuthorizeRemoteStart,
+        true
+      )
       return isOnline && remoteStartEnabled
     } catch (error) {
       logger.warn(
-        `${this.chargingStation.logPrefix()} Error checking remote authorization availability`,
+        `${this.chargingStation.logPrefix()} ${moduleName}.isRemoteAvailable: Error checking remote authorization availability`,
         error
       )
       return false
@@ -465,17 +391,17 @@ export class OCPP20AuthAdapter implements OCPPAuthAdapter {
 
   /**
    * Check if identifier is valid for OCPP 2.0
-   * @param identifier - Unified identifier to validate against OCPP 2.0 rules
+   * @param identifier - Identifier to validate against OCPP 2.0 rules
    * @returns True if identifier meets OCPP 2.0 format requirements (max 36 chars, valid type)
    */
-  isValidIdentifier (identifier: UnifiedIdentifier): boolean {
+  isValidIdentifier (identifier: Identifier): boolean {
     // OCPP 2.0 idToken validation
     if (!identifier.value || typeof identifier.value !== 'string') {
       return false
     }
 
     // Check length (OCPP 2.0 spec: max 36 characters)
-    if (identifier.value.length === 0 || identifier.value.length > 36) {
+    if (isEmpty(identifier.value) || identifier.value.length > 36) {
       return false
     }
 
@@ -509,7 +435,7 @@ export class OCPP20AuthAdapter implements OCPPAuthAdapter {
 
       if (!hasRemoteAuth && !hasLocalAuth && !hasCertAuth) {
         logger.warn(
-          `${this.chargingStation.logPrefix()} OCPP 2.0 adapter: No authorization methods enabled`
+          `${this.chargingStation.logPrefix()} ${moduleName}.validateConfiguration: No authorization methods enabled`
         )
         return false
       }
@@ -517,7 +443,7 @@ export class OCPP20AuthAdapter implements OCPPAuthAdapter {
       // Validate timeout values
       if (config.authorizationTimeout < 1) {
         logger.warn(
-          `${this.chargingStation.logPrefix()} OCPP 2.0 adapter: Invalid authorization timeout`
+          `${this.chargingStation.logPrefix()} ${moduleName}.validateConfiguration: Invalid authorization timeout`
         )
         return false
       }
@@ -525,48 +451,11 @@ export class OCPP20AuthAdapter implements OCPPAuthAdapter {
       return true
     } catch (error) {
       logger.error(
-        `${this.chargingStation.logPrefix()} OCPP 2.0 adapter configuration validation failed`,
+        `${this.chargingStation.logPrefix()} ${moduleName}.validateConfiguration: Configuration validation failed`,
         error
       )
       return false
     }
-  }
-
-  /**
-   * Get default variable value based on OCPP 2.0.1 specification
-   * @param component - OCPP component name (e.g., 'AuthCtrlr')
-   * @param variable - OCPP variable name (e.g., 'AuthorizeRemoteStart')
-   * @param useFallback - Whether to return fallback values when variable is not configured
-   * @returns Default value according to OCPP 2.0.1 spec, or undefined if no default exists
-   */
-  private getDefaultVariableValue (
-    component: string,
-    variable: string,
-    useFallback: boolean
-  ): string | undefined {
-    if (!useFallback) {
-      return undefined
-    }
-
-    // Default values from OCPP 2.0.1 specification and variable registry
-    if (component === 'AuthCtrlr') {
-      switch (variable) {
-        case 'AuthorizeRemoteStart':
-          return 'true' // OCPP 2.0.1 default: remote start requires authorization
-        case 'Enabled':
-          return 'true' // Default: authorization is enabled
-        case 'LocalAuthListEnabled':
-          return 'true' // Default: enable local auth list
-        case 'LocalAuthorizeOffline':
-          return 'true' // OCPP 2.0.1 default: allow offline authorization
-        case 'LocalPreAuthorize':
-          return 'false' // OCPP 2.0.1 default: wait for CSMS authorization
-        default:
-          return undefined
-      }
-    }
-
-    return undefined
   }
 
   /**
@@ -575,230 +464,18 @@ export class OCPP20AuthAdapter implements OCPPAuthAdapter {
    */
   private getOfflineAuthorizationConfig (): boolean {
     try {
-      // In OCPP 2.0, this would be controlled by LocalAuthorizeOffline variable
-      // For now, return a default value
-      return true
+      return OCPP20ServiceUtils.readVariableAsBoolean(
+        this.chargingStation,
+        OCPP20ComponentName.AuthCtrlr,
+        OCPP20RequiredVariableName.LocalAuthorizationOffline,
+        true
+      )
     } catch (error) {
       logger.warn(
-        `${this.chargingStation.logPrefix()} Error getting offline authorization config`,
+        `${this.chargingStation.logPrefix()} ${moduleName}.getOfflineAuthorizationConfig: Error getting offline authorization config`,
         error
       )
       return false
     }
-  }
-
-  /**
-   * Get variable value from OCPP 2.0 variable system
-   * @param component - OCPP component name (e.g., 'AuthCtrlr')
-   * @param variable - OCPP variable name (e.g., 'AuthorizeRemoteStart')
-   * @param useDefaultFallback - If true, use OCPP 2.0.1 spec default values when variable is not found
-   * @returns Promise resolving to variable value as string, or undefined if not available
-   */
-  private getVariableValue (
-    component: string,
-    variable: string,
-    useDefaultFallback = true
-  ): string | undefined {
-    try {
-      const variableManager = OCPP20VariableManager.getInstance()
-
-      const results = variableManager.getVariables(this.chargingStation, [
-        {
-          component: { name: component },
-          variable: { name: variable },
-        },
-      ])
-
-      // Check if variable was successfully retrieved
-      if (results.length === 0) {
-        logger.debug(
-          `${this.chargingStation.logPrefix()} Variable ${component}.${variable} not found in registry`
-        )
-        return this.getDefaultVariableValue(component, variable, useDefaultFallback)
-      }
-
-      const result = results[0]
-
-      // Check for errors or rejection
-      if (
-        result.attributeStatus !== GetVariableStatusEnumType.Accepted ||
-        result.attributeValue == null
-      ) {
-        logger.debug(
-          `${this.chargingStation.logPrefix()} Variable ${component}.${variable} not available: ${result.attributeStatus}`
-        )
-        return this.getDefaultVariableValue(component, variable, useDefaultFallback)
-      }
-
-      return result.attributeValue
-    } catch (error) {
-      logger.warn(
-        `${this.chargingStation.logPrefix()} Error getting variable ${component}.${variable}`,
-        error
-      )
-      return this.getDefaultVariableValue(component, variable, useDefaultFallback)
-    }
-  }
-
-  /**
-   * Map unified identifier type to OCPP 2.0 IdToken type
-   * @param unifiedType - Unified identifier type to convert
-   * @returns Corresponding OCPP 2.0 IdTokenEnumType value
-   */
-  private mapFromUnifiedIdentifierType (unifiedType: IdentifierType): OCPP20IdTokenEnumType {
-    switch (unifiedType) {
-      case IdentifierType.CENTRAL:
-        return OCPP20IdTokenEnumType.Central
-      case IdentifierType.E_MAID:
-        return OCPP20IdTokenEnumType.eMAID
-      case IdentifierType.ID_TAG:
-        return OCPP20IdTokenEnumType.Local
-      case IdentifierType.ISO14443:
-        return OCPP20IdTokenEnumType.ISO14443
-      case IdentifierType.ISO15693:
-        return OCPP20IdTokenEnumType.ISO15693
-      case IdentifierType.KEY_CODE:
-        return OCPP20IdTokenEnumType.KeyCode
-      case IdentifierType.LOCAL:
-        return OCPP20IdTokenEnumType.Local
-      case IdentifierType.MAC_ADDRESS:
-        return OCPP20IdTokenEnumType.MacAddress
-      case IdentifierType.NO_AUTHORIZATION:
-        return OCPP20IdTokenEnumType.NoAuthorization
-      default:
-        return OCPP20IdTokenEnumType.Central
-    }
-  }
-
-  /**
-   * Maps OCPP 2.0 AuthorizationStatusEnumType to unified AuthorizationStatus
-   * @param ocpp20Status - OCPP 2.0 authorization status
-   * @returns Unified authorization status
-   */
-  private mapOCPP20AuthStatus (
-    ocpp20Status: OCPP20AuthorizationStatusEnumType
-  ): AuthorizationStatus {
-    switch (ocpp20Status) {
-      case OCPP20AuthorizationStatusEnumType.Accepted:
-        return AuthorizationStatus.ACCEPTED
-      case OCPP20AuthorizationStatusEnumType.Blocked:
-        return AuthorizationStatus.BLOCKED
-      case OCPP20AuthorizationStatusEnumType.ConcurrentTx:
-        return AuthorizationStatus.CONCURRENT_TX
-      case OCPP20AuthorizationStatusEnumType.Expired:
-        return AuthorizationStatus.EXPIRED
-      case OCPP20AuthorizationStatusEnumType.Invalid:
-        return AuthorizationStatus.INVALID
-      case OCPP20AuthorizationStatusEnumType.NoCredit:
-        return AuthorizationStatus.NO_CREDIT
-      case OCPP20AuthorizationStatusEnumType.NotAllowedTypeEVSE:
-        return AuthorizationStatus.NOT_ALLOWED_TYPE_EVSE
-      case OCPP20AuthorizationStatusEnumType.NotAtThisLocation:
-        return AuthorizationStatus.NOT_AT_THIS_LOCATION
-      case OCPP20AuthorizationStatusEnumType.NotAtThisTime:
-        return AuthorizationStatus.NOT_AT_THIS_TIME
-      case OCPP20AuthorizationStatusEnumType.Unknown:
-      default:
-        return AuthorizationStatus.UNKNOWN
-    }
-  }
-
-  /**
-   * Map OCPP 2.0 IdToken type to unified identifier type
-   * @param ocpp20Type - OCPP 2.0 IdTokenEnumType to convert
-   * @returns Corresponding unified IdentifierType value
-   */
-  private mapToUnifiedIdentifierType (ocpp20Type: OCPP20IdTokenEnumType): IdentifierType {
-    switch (ocpp20Type) {
-      case OCPP20IdTokenEnumType.Central:
-      case OCPP20IdTokenEnumType.Local:
-        return IdentifierType.ID_TAG
-      case OCPP20IdTokenEnumType.eMAID:
-        return IdentifierType.E_MAID
-      case OCPP20IdTokenEnumType.ISO14443:
-        return IdentifierType.ISO14443
-      case OCPP20IdTokenEnumType.ISO15693:
-        return IdentifierType.ISO15693
-      case OCPP20IdTokenEnumType.KeyCode:
-        return IdentifierType.KEY_CODE
-      case OCPP20IdTokenEnumType.MacAddress:
-        return IdentifierType.MAC_ADDRESS
-      case OCPP20IdTokenEnumType.NoAuthorization:
-        return IdentifierType.NO_AUTHORIZATION
-      default:
-        return IdentifierType.ID_TAG
-    }
-  }
-
-  /**
-   * Parse and validate a boolean variable value
-   * @param value - String value to parse ('true', 'false', '1', '0')
-   * @param defaultValue - Fallback value when parsing fails or value is undefined
-   * @returns Parsed boolean value, or defaultValue if parsing fails
-   */
-  private parseBooleanVariable (value: string | undefined, defaultValue: boolean): boolean {
-    if (value == null) {
-      return defaultValue
-    }
-
-    const normalized = value.toLowerCase().trim()
-
-    if (normalized === 'true' || normalized === '1') {
-      return true
-    }
-
-    if (normalized === 'false' || normalized === '0') {
-      return false
-    }
-
-    logger.warn(
-      `${this.chargingStation.logPrefix()} Invalid boolean value '${value}', using default: ${defaultValue.toString()}`
-    )
-    return defaultValue
-  }
-
-  /**
-   * Parse and validate an integer variable value
-   * @param value - String value to parse as integer
-   * @param defaultValue - Fallback value when parsing fails or value is undefined
-   * @param min - Optional minimum allowed value (clamped if exceeded)
-   * @param max - Optional maximum allowed value (clamped if exceeded)
-   * @returns Parsed integer value clamped to min/max bounds, or defaultValue if parsing fails
-   */
-  private parseIntegerVariable (
-    value: string | undefined,
-    defaultValue: number,
-    min?: number,
-    max?: number
-  ): number {
-    if (value == null) {
-      return defaultValue
-    }
-
-    const parsed = parseInt(value, 10)
-
-    if (isNaN(parsed)) {
-      logger.warn(
-        `${this.chargingStation.logPrefix()} Invalid integer value '${value}', using default: ${defaultValue.toString()}`
-      )
-      return defaultValue
-    }
-
-    // Validate range
-    if (min != null && parsed < min) {
-      logger.warn(
-        `${this.chargingStation.logPrefix()} Integer value ${parsed.toString()} below minimum ${min.toString()}, using minimum`
-      )
-      return min
-    }
-
-    if (max != null && parsed > max) {
-      logger.warn(
-        `${this.chargingStation.logPrefix()} Integer value ${parsed.toString()} above maximum ${max.toString()}, using maximum`
-      )
-      return max
-    }
-
-    return parsed
   }
 }

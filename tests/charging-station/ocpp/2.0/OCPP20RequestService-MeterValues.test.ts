@@ -22,7 +22,7 @@ import {
 import { Constants } from '../../../../src/utils/index.js'
 import { standardCleanup } from '../../../helpers/TestLifecycleHelpers.js'
 import { TEST_CHARGING_STATION_BASE_NAME } from '../../ChargingStationTestConstants.js'
-import { createMockChargingStation } from '../../ChargingStationTestUtils.js'
+import { createMockChargingStation } from '../../helpers/StationHelpers.js'
 
 await describe('G01 - MeterValues', async () => {
   let station: ChargingStation
@@ -34,12 +34,11 @@ await describe('G01 - MeterValues', async () => {
       baseName: TEST_CHARGING_STATION_BASE_NAME,
       connectorsCount: 1,
       evseConfiguration: { evsesCount: 1 },
-      heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
       stationInfo: {
         ocppStrictCompliance: false,
         ocppVersion: OCPPVersion.VERSION_201,
       },
-      websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+      websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
     })
     station = newStation
 
@@ -64,7 +63,7 @@ await describe('G01 - MeterValues', async () => {
       },
     ]
 
-    await service.requestMeterValues(station, evseId, meterValue)
+    await service.requestHandler(station, OCPP20RequestCommand.METER_VALUES, { evseId, meterValue })
 
     assert.strictEqual(sendMessageMock.mock.calls.length, 1)
 
@@ -88,7 +87,7 @@ await describe('G01 - MeterValues', async () => {
       },
     ]
 
-    await service.requestMeterValues(station, evseId, meterValue)
+    await service.requestHandler(station, OCPP20RequestCommand.METER_VALUES, { evseId, meterValue })
 
     assert.strictEqual(sendMessageMock.mock.calls.length, 1)
 
@@ -108,8 +107,10 @@ await describe('G01 - MeterValues', async () => {
       },
     ]
 
-    // evseId 0 = main power meter
-    const response = await service.requestMeterValues(station, 0, meterValue)
+    const response = await service.requestHandler<
+      OCPP20MeterValuesRequest,
+      OCPP20MeterValuesResponse
+    >(station, OCPP20RequestCommand.METER_VALUES, { evseId: 0, meterValue })
 
     assert.strictEqual(sendMessageMock.mock.calls.length, 1)
 

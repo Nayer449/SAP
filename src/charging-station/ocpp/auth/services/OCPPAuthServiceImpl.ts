@@ -1,18 +1,28 @@
-import type { OCPP16AuthAdapter } from '../adapters/OCPP16AuthAdapter.js'
-import type { OCPP20AuthAdapter } from '../adapters/OCPP20AuthAdapter.js'
+import { millisecondsToSeconds } from 'date-fns'
 
-import { OCPPError } from '../../../../exception/OCPPError.js'
-import { ErrorType } from '../../../../types/index.js'
-import { OCPPVersion } from '../../../../types/ocpp/OCPPVersion.js'
-import { logger } from '../../../../utils/index.js'
-import { type ChargingStation } from '../../../ChargingStation.js'
+import type { OCPPAuthAdapter } from '../interfaces/OCPPAuthService.js'
+
+import { OCPPError } from '../../../../exception/index.js'
+import { ErrorType, OCPPVersion } from '../../../../types/index.js'
+import {
+  Constants,
+  convertToDate,
+  ensureError,
+  getErrorMessage,
+  has,
+  logger,
+  roundTo,
+  truncateId,
+} from '../../../../utils/index.js'
+import { type ChargingStation } from '../../../index.js'
 import { AuthComponentFactory } from '../factories/AuthComponentFactory.js'
 import {
+  type AuthCache,
   type AuthStats,
   type AuthStrategy,
+  type LocalAuthListManager,
   type OCPPAuthService,
 } from '../interfaces/OCPPAuthService.js'
-import { LocalAuthStrategy } from '../strategies/LocalAuthStrategy.js'
 import {
   type AuthConfiguration,
   AuthContext,
@@ -20,15 +30,19 @@ import {
   type AuthorizationResult,
   AuthorizationStatus,
   type AuthRequest,
+  type Identifier,
   IdentifierType,
-  type UnifiedIdentifier,
 } from '../types/AuthTypes.js'
 import { AuthConfigValidator } from '../utils/ConfigValidator.js'
 
+const moduleName = 'OCPPAuthServiceImpl'
+
 export class OCPPAuthServiceImpl implements OCPPAuthService {
-  private readonly adapters: Map<OCPPVersion, OCPP16AuthAdapter | OCPP20AuthAdapter>
+  private adapter?: OCPPAuthAdapter
+  private authCache?: AuthCache
   private readonly chargingStation: ChargingStation
   private config: AuthConfiguration
+  private localAuthListManager?: LocalAuthListManager
   private readonly metrics: {
     cacheHits: number
     cacheMisses: number
@@ -47,7 +61,6 @@ export class OCPPAuthServiceImpl implements OCPPAuthService {
   constructor (chargingStation: ChargingStation) {
     this.chargingStation = chargingStation
     this.strategies = new Map()
-    this.adapters = new Map()
     this.strategyPriority = ['local', 'remote', 'certificate']
 
     // Initialize metrics tracking
@@ -66,7 +79,7 @@ export class OCPPAuthServiceImpl implements OCPPAuthService {
     // Initialize default configuration
     this.config = this.createDefaultConfiguration()
 
-    // Note: Adapters and strategies will be initialized async via initialize()
+    // Note: Adapter and strategies will be initialized async via initialize()
   }
 
   /**
@@ -82,7 +95,7 @@ export class OCPPAuthServiceImpl implements OCPPAuthService {
     this.metrics.totalRequests++
 
     logger.debug(
-      `${this.chargingStation.logPrefix()} Starting authentication for identifier: ${JSON.stringify(request.identifier)}`
+      `${this.chargingStation.logPrefix()} ${moduleName}.authenticate: Starting authentication for identifier: '${truncateId(request.identifier.value)}'`
     )
 
     // Try each strategy in priority order
@@ -91,28 +104,28 @@ export class OCPPAuthServiceImpl implements OCPPAuthService {
 
       if (!strategy) {
         logger.debug(
-          `${this.chargingStation.logPrefix()} Strategy '${strategyName}' not available, skipping`
+          `${this.chargingStation.logPrefix()} ${moduleName}.authenticate: Strategy '${strategyName}' not available, skipping`
         )
         continue
       }
 
       if (!strategy.canHandle(request, this.config)) {
         logger.debug(
-          `${this.chargingStation.logPrefix()} Strategy '${strategyName}' cannot handle request, skipping`
+          `${this.chargingStation.logPrefix()} ${moduleName}.authenticate: Strategy '${strategyName}' cannot handle request, skipping`
         )
         continue
       }
 
       try {
         logger.debug(
-          `${this.chargingStation.logPrefix()} Trying authentication strategy: ${strategyName}`
+          `${this.chargingStation.logPrefix()} ${moduleName}.authenticate: Trying authentication strategy: ${strategyName}`
         )
 
         const result = await strategy.authenticate(request, this.config)
 
         if (!result) {
           logger.debug(
-            `${this.chargingStation.logPrefix()} Strategy '${strategyName}' returned no result, continuing to next strategy`
+            `${this.chargingStation.logPrefix()} ${moduleName}.authenticate: Strategy '${strategyName}' returned no result, continuing to next strategy`
           )
           continue
         }
@@ -123,7 +136,7 @@ export class OCPPAuthServiceImpl implements OCPPAuthService {
         this.updateMetricsForResult(result, strategyName, duration)
 
         logger.info(
-          `${this.chargingStation.logPrefix()} Authentication successful using ${strategyName} strategy (${String(duration)}ms): ${result.status}`
+          `${this.chargingStation.logPrefix()} ${moduleName}.authenticate: Authentication successful using ${strategyName} strategy (${String(duration)}ms): ${result.status}`
         )
 
         return {
@@ -144,13 +157,13 @@ export class OCPPAuthServiceImpl implements OCPPAuthService {
           timestamp: result.timestamp,
         }
       } catch (error) {
-        lastError = error as Error
+        lastError = ensureError(error)
         logger.debug(
-          `${this.chargingStation.logPrefix()} Strategy '${strategyName}' failed: ${(error as Error).message}`
+          `${this.chargingStation.logPrefix()} ${moduleName}.authenticate: Strategy '${strategyName}' failed: ${getErrorMessage(error)}`
         )
 
         // Continue to next strategy unless it's a critical error
-        if (this.isCriticalError(error as Error)) {
+        if (this.isCriticalError(ensureError(error))) {
           break
         }
       }
@@ -165,7 +178,7 @@ export class OCPPAuthServiceImpl implements OCPPAuthService {
     this.metrics.totalResponseTime += duration
 
     logger.error(
-      `${this.chargingStation.logPrefix()} Authentication failed for all strategies (${String(duration)}ms): ${errorMessage}`
+      `${this.chargingStation.logPrefix()} ${moduleName}.authenticate: Authentication failed for all strategies (${String(duration)}ms): ${errorMessage}`
     )
 
     return {
@@ -194,7 +207,7 @@ export class OCPPAuthServiceImpl implements OCPPAuthService {
    * @param request - Authorization request containing identifier, context, and options
    * @returns Promise resolving to the authorization result with status and metadata
    */
-  public async authorize (request: AuthRequest): Promise<AuthorizationResult> {
+  public authorize (request: AuthRequest): Promise<AuthorizationResult> {
     return this.authenticate(request)
   }
 
@@ -238,7 +251,7 @@ export class OCPPAuthServiceImpl implements OCPPAuthService {
       const duration = Date.now() - startTime
 
       logger.info(
-        `${this.chargingStation.logPrefix()} Direct authentication with ${strategyName} successful (${String(duration)}ms): ${result.status}`
+        `${this.chargingStation.logPrefix()} ${moduleName}.authorizeWithStrategy: Direct authentication with ${strategyName} successful (${String(duration)}ms): ${result.status}`
       )
 
       return {
@@ -258,7 +271,7 @@ export class OCPPAuthServiceImpl implements OCPPAuthService {
     } catch (error) {
       const duration = Date.now() - startTime
       logger.error(
-        `${this.chargingStation.logPrefix()} Direct authentication with ${strategyName} failed (${String(duration)}ms): ${(error as Error).message}`
+        `${this.chargingStation.logPrefix()} ${moduleName}.authorizeWithStrategy: Direct authentication with ${strategyName} failed (${String(duration)}ms): ${getErrorMessage(error)}`
       )
       throw error
     }
@@ -268,66 +281,13 @@ export class OCPPAuthServiceImpl implements OCPPAuthService {
    * Clear all cached authorizations
    */
   public clearCache (): void {
-    logger.debug(`${this.chargingStation.logPrefix()} Clearing all cached authorizations`)
-
-    // Clear cache in local strategy
-    const localStrategy = this.strategies.get('local') as LocalAuthStrategy | undefined
-    const localAuthCache = localStrategy?.getAuthCache()
-    if (localAuthCache) {
-      localAuthCache.clear()
-      logger.info(`${this.chargingStation.logPrefix()} Authorization cache cleared`)
-    } else {
-      logger.debug(`${this.chargingStation.logPrefix()} No authorization cache available to clear`)
+    if (this.authCache == null) {
+      return
     }
-  }
-
-  /**
-   * Get authentication statistics
-   * @returns Authentication statistics including version and supported identifier types
-   */
-  public getAuthenticationStats (): {
-    availableStrategies: string[]
-    ocppVersion: string
-    supportedIdentifierTypes: string[]
-    totalStrategies: number
-  } {
-    // Determine supported identifier types by testing each strategy
-    const supportedTypes = new Set<string>()
-
-    // Test common identifier types
-    const ocppVersion =
-      this.chargingStation.stationInfo?.ocppVersion === OCPPVersion.VERSION_16
-        ? OCPPVersion.VERSION_16
-        : OCPPVersion.VERSION_20
-    const testIdentifiers: UnifiedIdentifier[] = [
-      { ocppVersion, type: IdentifierType.ISO14443, value: 'test' },
-      { ocppVersion, type: IdentifierType.ISO15693, value: 'test' },
-      { ocppVersion, type: IdentifierType.KEY_CODE, value: 'test' },
-      { ocppVersion, type: IdentifierType.LOCAL, value: 'test' },
-      { ocppVersion, type: IdentifierType.MAC_ADDRESS, value: 'test' },
-      { ocppVersion, type: IdentifierType.NO_AUTHORIZATION, value: 'test' },
-    ]
-
-    testIdentifiers.forEach(identifier => {
-      if (this.isSupported(identifier)) {
-        supportedTypes.add(identifier.type)
-      }
-    })
-
-    return {
-      availableStrategies: this.getAvailableStrategies(),
-      ocppVersion: this.chargingStation.stationInfo?.ocppVersion ?? 'unknown',
-      supportedIdentifierTypes: Array.from(supportedTypes),
-      totalStrategies: this.strategies.size,
-    }
-  }
-
-  /**
-   * Get all available strategies
-   * @returns Array of registered strategy names
-   */
-  public getAvailableStrategies (): string[] {
-    return Array.from(this.strategies.keys())
+    this.authCache.clear()
+    logger.info(
+      `${this.chargingStation.logPrefix()} ${moduleName}.clearCache: Authorization cache cleared`
+    )
   }
 
   /**
@@ -339,10 +299,18 @@ export class OCPPAuthServiceImpl implements OCPPAuthService {
   }
 
   /**
+   * Get the local authorization list manager
+   * @returns Local authorization list manager or undefined if not enabled
+   */
+  public getLocalAuthListManager (): LocalAuthListManager | undefined {
+    return this.localAuthListManager
+  }
+
+  /**
    * Get authentication statistics
    * @returns Authentication statistics including cache and rate limiting metrics
    */
-  public async getStats (): Promise<AuthStats> {
+  public getStats (): AuthStats {
     const avgResponseTime =
       this.metrics.totalRequests > 0
         ? this.metrics.totalResponseTime / this.metrics.totalRequests
@@ -360,32 +328,32 @@ export class OCPPAuthServiceImpl implements OCPPAuthService {
         : 0
 
     // Get rate limiting stats from cache via remote strategy
-    let rateLimitStats:
+    let rateLimitStatistics:
       | undefined
       | { blockedRequests: number; rateLimitedIdentifiers: number; totalChecks: number }
     const remoteStrategy = this.strategies.get('remote')
     if (remoteStrategy?.getStats) {
-      const strategyStats = await remoteStrategy.getStats()
-      if ('cache' in strategyStats) {
-        const cacheStats = strategyStats.cache as {
+      const strategyStatistics = remoteStrategy.getStats()
+      if (has('cache', strategyStatistics)) {
+        const cacheStatistics = strategyStatistics.cache as {
           rateLimit?: {
             blockedRequests: number
             rateLimitedIdentifiers: number
             totalChecks: number
           }
         }
-        rateLimitStats = cacheStats.rateLimit
+        rateLimitStatistics = cacheStatistics.rateLimit
       }
     }
 
     return {
-      avgResponseTime: Math.round(avgResponseTime * 100) / 100,
-      cacheHitRate: Math.round(cacheHitRate * 10000) / 100,
+      avgResponseTime: roundTo(avgResponseTime, 2),
+      cacheHitRate: roundTo(cacheHitRate * 100, 2),
       failedAuth: this.metrics.failedAuth,
-      lastUpdated: this.metrics.lastReset,
-      localUsageRate: Math.round(localUsageRate * 10000) / 100,
-      rateLimit: rateLimitStats,
-      remoteSuccessRate: Math.round(remoteSuccessRate * 10000) / 100,
+      lastUpdatedDate: this.metrics.lastReset,
+      localUsageRate: roundTo(localUsageRate * 100, 2),
+      rateLimit: rateLimitStatistics,
+      remoteSuccessRate: roundTo(remoteSuccessRate * 100, 2),
       successfulAuth: this.metrics.successfulAuth,
       totalRequests: this.metrics.totalRequests,
     }
@@ -404,42 +372,36 @@ export class OCPPAuthServiceImpl implements OCPPAuthService {
    * Async initialization of adapters and strategies
    * Must be called after construction
    */
-  public async initialize (): Promise<void> {
-    await this.initializeAdapters()
-    await this.initializeStrategies()
+  public initialize (): void {
+    this.initializeAdapter()
+    if (this.adapter != null) {
+      this.config.maxLocalAuthListEntries ??= this.adapter.getMaxLocalAuthListEntries()
+    }
+    this.initializeStrategies()
   }
 
   /**
    * Invalidate cached authorization for an identifier
-   * @param identifier - Unified identifier whose cached authorization should be invalidated
+   * @param identifier - Identifier whose cached authorization should be invalidated
    */
-  public invalidateCache (identifier: UnifiedIdentifier): void {
-    logger.debug(
-      `${this.chargingStation.logPrefix()} Invalidating cache for identifier: ${identifier.value}`
-    )
-
-    // Invalidate in local strategy
-    const localStrategy = this.strategies.get('local') as LocalAuthStrategy | undefined
-    if (localStrategy) {
-      localStrategy.invalidateCache(identifier.value)
-      logger.info(
-        `${this.chargingStation.logPrefix()} Cache invalidated for identifier: ${identifier.value}`
-      )
-    } else {
-      logger.debug(
-        `${this.chargingStation.logPrefix()} No local strategy available for cache invalidation`
-      )
+  public invalidateCache (identifier: Identifier): void {
+    if (this.authCache == null) {
+      return
     }
+    this.authCache.remove(identifier.value)
+    logger.info(
+      `${this.chargingStation.logPrefix()} ${moduleName}.invalidateCache: Cache invalidated for identifier: '${truncateId(identifier.value)}'`
+    )
   }
 
   /**
    * Check if an identifier is locally authorized (cache/local list)
-   * @param identifier - Unified identifier to check for local authorization
+   * @param identifier - Identifier to check for local authorization
    * @param connectorId - Optional connector ID for context-specific authorization
    * @returns Promise resolving to the authorization result if locally authorized, or undefined if not found
    */
   public async isLocallyAuthorized (
-    identifier: UnifiedIdentifier,
+    identifier: Identifier,
     connectorId?: number
   ): Promise<AuthorizationResult | undefined> {
     // Try local strategy first for quick cache/list lookup
@@ -461,7 +423,7 @@ export class OCPPAuthServiceImpl implements OCPPAuthService {
         }
       } catch (error) {
         logger.debug(
-          `${this.chargingStation.logPrefix()} Local authorization check failed: ${(error as Error).message}`
+          `${this.chargingStation.logPrefix()} ${moduleName}.isLocallyAuthorized: Local authorization check failed: ${getErrorMessage(error)}`
         )
       }
     }
@@ -471,10 +433,10 @@ export class OCPPAuthServiceImpl implements OCPPAuthService {
 
   /**
    * Check if authentication is supported for given identifier type
-   * @param identifier - Unified identifier to check for support
+   * @param identifier - Identifier to check for support
    * @returns True if at least one strategy can handle the identifier type, false otherwise
    */
-  public isSupported (identifier: UnifiedIdentifier): boolean {
+  public isSupported (identifier: Identifier): boolean {
     // Create a minimal request to check applicability
     const testRequest: AuthRequest = {
       allowOffline: false,
@@ -500,8 +462,75 @@ export class OCPPAuthServiceImpl implements OCPPAuthService {
       return false
     }
 
-    // For now return true - real implementation would test remote connectivity
-    return true
+    // Check if adapter reports remote availability
+    if (this.adapter) {
+      try {
+        if (this.adapter.isRemoteAvailable()) {
+          return true
+        }
+      } catch {
+        // Adapter unavailable
+      }
+    }
+
+    return false
+  }
+
+  public updateCacheEntry (
+    identifier: string,
+    status: AuthorizationStatus,
+    expiryDate?: Date | string,
+    identifierType?: IdentifierType
+  ): void {
+    if (!this.config.authorizationCacheEnabled) {
+      return
+    }
+
+    if (
+      identifierType === IdentifierType.NO_AUTHORIZATION ||
+      identifierType === IdentifierType.CENTRAL
+    ) {
+      logger.debug(
+        `${this.chargingStation.logPrefix()} ${moduleName}.updateCacheEntry: Skipping cache for ${identifierType} identifier type`
+      )
+      return
+    }
+
+    if (this.authCache == null) {
+      logger.debug(
+        `${this.chargingStation.logPrefix()} ${moduleName}.updateCacheEntry: No auth cache available`
+      )
+      return
+    }
+
+    let ttl: number | undefined
+    if (expiryDate != null) {
+      const expiry = convertToDate(expiryDate)
+      if (expiry != null) {
+        const ttlSeconds = millisecondsToSeconds(expiry.getTime() - Date.now())
+        if (ttlSeconds <= 0) {
+          logger.debug(
+            `${this.chargingStation.logPrefix()} ${moduleName}.updateCacheEntry: Skipping expired entry for '${truncateId(identifier)}'`
+          )
+          return
+        }
+        ttl = ttlSeconds
+      }
+    }
+    const effectiveTtl = ttl ?? this.config.authorizationCacheLifetime
+
+    const result: AuthorizationResult = {
+      isOffline: false,
+      method: AuthenticationMethod.REMOTE_AUTHORIZATION,
+      status,
+      timestamp: new Date(),
+    }
+
+    this.authCache.set(identifier, result, effectiveTtl)
+
+    logger.debug(
+      `${this.chargingStation.logPrefix()} ${moduleName}.updateCacheEntry: Updated cache for '${truncateId(identifier)}' status=${status}${effectiveTtl != null ? `, ttl=${effectiveTtl.toString()}s` : ''}`
+    )
   }
 
   /**
@@ -511,15 +540,17 @@ export class OCPPAuthServiceImpl implements OCPPAuthService {
    */
   public updateConfiguration (config: Partial<AuthConfiguration>): void {
     // Merge new config with existing
-    const newConfig = { ...this.config, ...config }
+    const newConfiguration = { ...this.config, ...config }
 
     // Validate merged configuration
-    AuthConfigValidator.validate(newConfig)
+    AuthConfigValidator.validate(newConfiguration)
 
     // Apply validated configuration
-    this.config = newConfig
+    this.config = newConfiguration
 
-    logger.info(`${this.chargingStation.logPrefix()} Authentication configuration updated`)
+    logger.info(
+      `${this.chargingStation.logPrefix()} ${moduleName}.updateConfiguration: Authentication configuration updated`
+    )
   }
 
   /**
@@ -542,7 +573,7 @@ export class OCPPAuthServiceImpl implements OCPPAuthService {
       obj: AuthStrategy
     ): obj is AuthStrategy & { configure: (config: Record<string, unknown>) => void } => {
       return (
-        'configure' in obj &&
+        has('configure', obj) &&
         typeof (obj as AuthStrategy & { configure?: unknown }).configure === 'function'
       )
     }
@@ -551,11 +582,11 @@ export class OCPPAuthServiceImpl implements OCPPAuthService {
     if (isConfigurable(strategy)) {
       strategy.configure(config)
       logger.info(
-        `${this.chargingStation.logPrefix()} Updated configuration for strategy: ${strategyName}`
+        `${this.chargingStation.logPrefix()} ${moduleName}.updateStrategyConfiguration: Updated configuration for strategy: ${strategyName}`
       )
     } else {
       logger.warn(
-        `${this.chargingStation.logPrefix()} Strategy '${strategyName}' does not support runtime configuration updates`
+        `${this.chargingStation.logPrefix()} ${moduleName}.updateStrategyConfiguration: Strategy '${strategyName}' does not support runtime configuration updates`
       )
     }
   }
@@ -576,7 +607,8 @@ export class OCPPAuthServiceImpl implements OCPPAuthService {
       certificateValidationStrict: false,
       localAuthListEnabled: true,
       localPreAuthorize: false,
-      maxCacheEntries: 1000,
+      maxCacheEntries: Constants.DEFAULT_AUTH_CACHE_MAX_ENTRIES,
+      ocppVersion: this.chargingStation.stationInfo?.ocppVersion,
       offlineAuthorizationEnabled: true,
       remoteAuthorization: true,
       unknownIdAuthorization: AuthorizationStatus.INVALID,
@@ -584,56 +616,40 @@ export class OCPPAuthServiceImpl implements OCPPAuthService {
   }
 
   /**
-   * Initialize OCPP adapters using AuthComponentFactory
+   * Initialize OCPP adapter using AuthComponentFactory
    */
-  private async initializeAdapters (): Promise<void> {
-    const adapters = await AuthComponentFactory.createAdapters(this.chargingStation)
-
-    if (adapters.ocpp16Adapter) {
-      this.adapters.set(OCPPVersion.VERSION_16, adapters.ocpp16Adapter)
-    }
-
-    if (adapters.ocpp20Adapter) {
-      this.adapters.set(OCPPVersion.VERSION_20, adapters.ocpp20Adapter)
-      this.adapters.set(OCPPVersion.VERSION_201, adapters.ocpp20Adapter)
-    }
+  private initializeAdapter (): void {
+    this.adapter = AuthComponentFactory.createAdapter(this.chargingStation)
   }
 
   /**
    * Initialize all authentication strategies using AuthComponentFactory
    */
-  private async initializeStrategies (): Promise<void> {
+  private initializeStrategies (): void {
     const ocppVersion = this.chargingStation.stationInfo?.ocppVersion
 
-    // Get adapters for strategy creation with proper typing
-    const ocpp16Adapter = this.adapters.get(OCPPVersion.VERSION_16) as OCPP16AuthAdapter | undefined
-    const ocpp20Adapter = this.adapters.get(OCPPVersion.VERSION_20) as OCPP20AuthAdapter | undefined
+    if (this.adapter == null) {
+      throw new OCPPError(ErrorType.INTERNAL_ERROR, 'Adapter must be initialized before strategies')
+    }
 
-    // Create auth cache for strategy injection
-    const authCache = AuthComponentFactory.createAuthCache(this.config)
+    this.authCache = AuthComponentFactory.createAuthCache(this.config)
+    this.localAuthListManager = AuthComponentFactory.createLocalAuthListManager(this.config)
 
-    // Create strategies using factory
-    const strategies = await AuthComponentFactory.createStrategies(
+    const strategies = AuthComponentFactory.createStrategies(
       this.chargingStation,
-      { ocpp16Adapter, ocpp20Adapter },
-      undefined, // manager - delegated to OCPPAuthServiceImpl
-      authCache,
+      this.adapter,
+      this.localAuthListManager,
+      this.authCache,
       this.config
     )
 
-    // Map strategies by their priority to strategy names
     strategies.forEach(strategy => {
-      if (strategy.priority === 1) {
-        this.strategies.set('local', strategy)
-      } else if (strategy.priority === 2) {
-        this.strategies.set('remote', strategy)
-      } else if (strategy.priority === 3) {
-        this.strategies.set('certificate', strategy)
-      }
+      const key = strategy.name.replace('AuthStrategy', '').toLowerCase()
+      this.strategies.set(key, strategy)
     })
 
     logger.info(
-      `${this.chargingStation.logPrefix()} Initialized ${String(this.strategies.size)} authentication strategies for OCPP ${ocppVersion ?? 'unknown'}`
+      `${this.chargingStation.logPrefix()} ${moduleName}.initializeStrategies: Initialized ${String(this.strategies.size)} authentication strategies for OCPP ${ocppVersion ?? 'unknown'}`
     )
   }
 

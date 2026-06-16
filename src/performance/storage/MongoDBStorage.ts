@@ -4,7 +4,7 @@ import { MongoClient } from 'mongodb'
 
 import { BaseError } from '../../exception/index.js'
 import { type Statistics, StorageType } from '../../types/index.js'
-import { Constants } from '../../utils/index.js'
+import { Constants, ensureError } from '../../utils/index.js'
 import { Storage } from './Storage.js'
 
 export class MongoDBStorage extends Storage {
@@ -26,7 +26,7 @@ export class MongoDBStorage extends Storage {
         this.opened = false
       }
     } catch (error) {
-      this.handleDBStorageError(StorageType.MONGO_DB, error as Error)
+      this.handleDBStorageError(StorageType.MONGO_DB, ensureError(error))
     }
   }
 
@@ -37,7 +37,7 @@ export class MongoDBStorage extends Storage {
         this.opened = true
       }
     } catch (error) {
-      this.handleDBStorageError(StorageType.MONGO_DB, error as Error)
+      this.handleDBStorageError(StorageType.MONGO_DB, ensureError(error))
     }
   }
 
@@ -50,13 +50,13 @@ export class MongoDBStorage extends Storage {
         .collection<Statistics>(Constants.PERFORMANCE_RECORDS_TABLE)
         .replaceOne(
           { id: performanceStatistics.id },
-          this.serializePerformanceStatistics(performanceStatistics) as unknown as Statistics,
+          this.serializePerformanceStatistics(performanceStatistics),
           { upsert: true }
         )
     } catch (error) {
       this.handleDBStorageError(
         StorageType.MONGO_DB,
-        error as Error,
+        ensureError(error),
         Constants.PERFORMANCE_RECORDS_TABLE
       )
     }

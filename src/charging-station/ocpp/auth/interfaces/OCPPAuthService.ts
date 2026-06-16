@@ -1,9 +1,11 @@
-import type { OCPPVersion } from '../../../../types/ocpp/OCPPVersion.js'
+import type { JsonObject, OCPPVersion } from '../../../../types/index.js'
 import type {
   AuthConfiguration,
   AuthorizationResult,
+  AuthorizationStatus,
   AuthRequest,
-  UnifiedIdentifier,
+  Identifier,
+  IdentifierType,
 } from '../types/AuthTypes.js'
 
 /**
@@ -63,8 +65,10 @@ export interface AuthComponentFactory {
 
   /**
    * Create a local auth list manager
+   * @param config - Authentication configuration controlling local auth list behavior
+   * @returns In-memory local auth list manager if enabled, undefined otherwise
    */
-  createLocalAuthListManager(): LocalAuthListManager
+  createLocalAuthListManager(config: AuthConfiguration): LocalAuthListManager | undefined
 
   /**
    * Create a strategy by name
@@ -83,7 +87,7 @@ export interface AuthStats {
   failedAuth: number
 
   /** Last update timestamp */
-  lastUpdated: Date
+  lastUpdatedDate: Date
 
   /** Local authorization usage rate */
   localUsageRate: number
@@ -121,12 +125,12 @@ export interface AuthStrategy {
    * Authenticate using this strategy
    * @param request - Authentication request
    * @param config - Current configuration
-   * @returns Promise resolving to authorization result, undefined if not handled
+   * @returns Authorization result, undefined if not handled
    */
   authenticate(
     request: AuthRequest,
     config: AuthConfiguration
-  ): Promise<AuthorizationResult | undefined>
+  ): AuthorizationResult | Promise<AuthorizationResult | undefined> | undefined
 
   /**
    * Check if this strategy can handle the given request
@@ -153,13 +157,13 @@ export interface AuthStrategy {
   /**
    * Get strategy-specific statistics
    */
-  getStats(): Promise<Record<string, unknown>> | Record<string, unknown>
+  getStats(): JsonObject
 
   /**
    * Initialize the strategy with configuration
    * @param config - Authentication configuration
    */
-  initialize(config: AuthConfiguration): Promise<void> | void
+  initialize(config: AuthConfiguration): void
 
   /**
    * Strategy name for identification
@@ -172,7 +176,7 @@ export interface AuthStrategy {
   readonly priority: number
 }
 
-export interface CacheStats {
+export interface CacheStats extends JsonObject {
   /** Number of entries evicted due to capacity limits */
   evictions: number
 
@@ -252,6 +256,27 @@ export interface CertificateInfo {
 }
 
 /**
+ * Entry used in differential update operations.
+ *
+ * When `status` is defined, the entry is added or updated in the list.
+ * When `status` is `undefined`, the entry is removed from the list.
+ * This models the OCPP behavior where absent idTagInfo (1.6) or
+ * absent idTokenInfo (2.0) signals removal.
+ */
+export interface DifferentialAuthEntry {
+  /** Optional expiry date */
+  expiryDate?: Date
+  /** Identifier value */
+  identifier: string
+  /** Entry metadata */
+  metadata?: Record<string, unknown>
+  /** Optional parent identifier */
+  parentId?: string
+  /** Authorization status — undefined signals removal */
+  status?: string
+}
+
+/**
  * Supporting types for interfaces
  */
 export interface LocalAuthEntry {
@@ -279,89 +304,107 @@ export interface LocalAuthListManager {
    * Add or update an entry in the local authorization list
    * @param entry - Authorization list entry
    */
-  addEntry(entry: LocalAuthEntry): Promise<void>
+  addEntry(entry: LocalAuthEntry): void
+
+  /**
+   * Apply a differential update to the list
+   * Entries with status are added/updated; entries without status are removed
+   * @param entries - Differential entries to apply
+   * @param version - New list version number
+   */
+  applyDifferentialUpdate(entries: DifferentialAuthEntry[], version: number): void
 
   /**
    * Clear all entries from the local authorization list
    */
-  clearAll(): Promise<void>
+  clearAll(): void
 
   /**
    * Get all entries (for synchronization)
    */
-  getAllEntries(): Promise<LocalAuthEntry[]>
+  getAllEntries(): LocalAuthEntry[]
 
   /**
    * Get an entry from the local authorization list
    * @param identifier - Identifier to look up
    * @returns Authorization entry or undefined if not found
    */
-  getEntry(identifier: string): Promise<LocalAuthEntry | undefined>
+  getEntry(identifier: string): LocalAuthEntry | undefined
 
   /**
    * Get list version/update count
    */
-  getVersion(): Promise<number>
+  getVersion(): number
 
   /**
    * Remove an entry from the local authorization list
    * @param identifier - Identifier to remove
    */
-  removeEntry(identifier: string): Promise<void>
+  removeEntry(identifier: string): void
+
+  /**
+   * Replace all entries with a new set (Full update)
+   * @param entries - New entries for the list
+   * @param version - New list version number
+   */
+  setEntries(entries: LocalAuthEntry[], version: number): void
 
   /**
    * Update list version
    */
-  updateVersion(version: number): Promise<void>
+  updateVersion(version: number): void
 }
 
 /**
  * OCPP version-specific adapter interface
  *
- * Adapters handle the translation between unified auth types
+ * Adapters handle the translation between auth types
  * and version-specific OCPP types and protocols.
  */
-export interface OCPPAuthAdapter {
+export interface OCPPAuthAdapter<TVersionId = unknown> {
   /**
    * Perform remote authorization using version-specific protocol
-   * @param identifier - Unified identifier to authorize
+   * @param identifier - Identifier to authorize
    * @param connectorId - Optional connector ID
    * @param transactionId - Optional transaction ID for stop auth
    * @returns Promise resolving to authorization result
    */
   authorizeRemote(
-    identifier: UnifiedIdentifier,
+    identifier: Identifier,
     connectorId?: number,
     transactionId?: number | string
   ): Promise<AuthorizationResult>
 
   /**
-   * Convert unified identifier to version-specific format
-   * @param identifier - Unified identifier
+   * Convert identifier to version-specific format
+   * @param identifier - Identifier
    * @returns Version-specific identifier
    */
-  convertFromUnifiedIdentifier(identifier: UnifiedIdentifier): object | string
+  convertFromIdentifier(identifier: Identifier): TVersionId
 
   /**
-   * Convert a version-specific identifier to unified format
+   * Convert a version-specific identifier to common format
    * @param identifier - Version-specific identifier
    * @param additionalData - Optional additional context data
-   * @returns Unified identifier
+   * @returns Identifier
    */
-  convertToUnifiedIdentifier(
-    identifier: object | string,
-    additionalData?: Record<string, unknown>
-  ): UnifiedIdentifier
+  convertToIdentifier(identifier: TVersionId, additionalData?: Record<string, unknown>): Identifier
 
   /**
    * Get adapter-specific configuration requirements
    */
-  getConfigurationSchema(): Record<string, unknown>
+  getConfigurationSchema(): JsonObject
+
+  /**
+   * Get the maximum number of entries allowed in the local auth list.
+   * @returns Maximum entries from station configuration, or undefined if not configured
+   */
+  getMaxLocalAuthListEntries(): number | undefined
 
   /**
    * Check if remote authorization is available
    */
-  isRemoteAvailable(): boolean | Promise<boolean>
+  isRemoteAvailable(): boolean
 
   /**
    * The OCPP version this adapter handles
@@ -377,7 +420,7 @@ export interface OCPPAuthAdapter {
 /**
  * Main OCPP Authentication Service interface
  *
- * This is the primary interface that provides unified authentication
+ * This is the primary interface that provides authentication
  * capabilities across different OCPP versions and strategies.
  */
 export interface OCPPAuthService {
@@ -399,15 +442,21 @@ export interface OCPPAuthService {
   getConfiguration(): AuthConfiguration
 
   /**
+   * Get the local authorization list manager
+   * @returns Local authorization list manager or undefined if not enabled
+   */
+  getLocalAuthListManager(): LocalAuthListManager | undefined
+
+  /**
    * Get authentication statistics
    */
-  getStats(): Promise<AuthStats>
+  getStats(): AuthStats
 
   /**
    * Invalidate cached authorization for an identifier
    * @param identifier - Identifier to invalidate
    */
-  invalidateCache(identifier: UnifiedIdentifier): void
+  invalidateCache(identifier: Identifier): void
 
   /**
    * Check if an identifier is locally authorized (cache/local list)
@@ -416,7 +465,7 @@ export interface OCPPAuthService {
    * @returns Promise resolving to local authorization result, undefined if not found
    */
   isLocallyAuthorized(
-    identifier: UnifiedIdentifier,
+    identifier: Identifier,
     connectorId?: number
   ): Promise<AuthorizationResult | undefined>
 
@@ -424,6 +473,20 @@ export interface OCPPAuthService {
    * Test connectivity to remote authorization service
    */
   testConnectivity(): boolean
+
+  /**
+   * Update a cache entry from a CSMS authorization response (C10.FR.01/04/05)
+   * @param identifier - The idToken string to cache
+   * @param status - The authorization status (mapped from OCPP version-specific types)
+   * @param expiryDate - Optional expiry date from the CSMS response
+   * @param identifierType - Optional identifier type for cache skip logic (C02.FR.03/C03.FR.02)
+   */
+  updateCacheEntry(
+    identifier: string,
+    status: AuthorizationStatus,
+    expiryDate?: Date | string,
+    identifierType?: IdentifierType
+  ): void
 
   /**
    * Update authentication configuration

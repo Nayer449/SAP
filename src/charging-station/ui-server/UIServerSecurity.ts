@@ -1,16 +1,26 @@
+import type { IncomingMessage } from 'node:http'
+
 import { timingSafeEqual } from 'node:crypto'
+
+import { BaseError } from '../../exception/index.js'
 
 interface RateLimitEntry {
   count: number
   resetTime: number
 }
 
-export const DEFAULT_MAX_PAYLOAD_SIZE = 1048576
+export const DEFAULT_MAX_PAYLOAD_SIZE_BYTES = 1048576
 export const DEFAULT_RATE_LIMIT = 100
-export const DEFAULT_RATE_WINDOW = 60000
+export const DEFAULT_RATE_WINDOW_MS = 60000
 export const DEFAULT_MAX_STATIONS = 100
 export const DEFAULT_MAX_TRACKED_IPS = 10000
-export const DEFAULT_COMPRESSION_THRESHOLD = 1024
+export const DEFAULT_COMPRESSION_THRESHOLD_BYTES = 1024
+
+export class PayloadTooLargeError extends BaseError {
+  public constructor (maxBytes: number) {
+    super(`Request body exceeds limit of ${maxBytes.toString()} bytes`)
+  }
+}
 
 export const isValidCredential = (provided: string, expected: string): boolean => {
   try {
@@ -32,13 +42,18 @@ export const isValidCredential = (provided: string, expected: string): boolean =
   }
 }
 
-export const createBodySizeLimiter = (maxBytes: number): ((chunkSize: number) => boolean) => {
-  let accumulatedBytes = 0
-
-  return (chunkSize: number): boolean => {
-    accumulatedBytes += chunkSize
-    return accumulatedBytes <= maxBytes
+export const readLimitedBody = async (req: IncomingMessage, maxBytes: number): Promise<Buffer> => {
+  const chunks: Buffer[] = []
+  let received = 0
+  for await (const chunk of req) {
+    const buffer = chunk as Buffer
+    received += buffer.length
+    if (received > maxBytes) {
+      throw new PayloadTooLargeError(maxBytes)
+    }
+    chunks.push(buffer)
   }
+  return Buffer.concat(chunks)
 }
 
 export const createRateLimiter = (
@@ -68,9 +83,9 @@ export const createRateLimiter = (
       }
     }
 
-    const entry = trackedIps.get(ipAddress)
+    const ipRateLimitEntry = trackedIps.get(ipAddress)
 
-    if (entry === undefined || now >= entry.resetTime) {
+    if (ipRateLimitEntry === undefined || now >= ipRateLimitEntry.resetTime) {
       trackedIps.set(ipAddress, {
         count: 1,
         resetTime: now + windowMs,
@@ -78,8 +93,8 @@ export const createRateLimiter = (
       return true
     }
 
-    if (entry.count < maxRequests) {
-      entry.count++
+    if (ipRateLimitEntry.count < maxRequests) {
+      ipRateLimitEntry.count++
       return true
     }
 

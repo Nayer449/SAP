@@ -1,5 +1,6 @@
-import type { AuthConfiguration, UnifiedIdentifier } from '../types/AuthTypes.js'
+import type { AuthConfiguration, Identifier } from '../types/AuthTypes.js'
 
+import { isNotEmptyString } from '../../../../utils/index.js'
 import { IdentifierType } from '../types/AuthTypes.js'
 
 /**
@@ -51,12 +52,7 @@ function isValidConnectorId (connectorId: number | undefined): boolean {
  * @returns True if the value is a non-empty string with at least one non-whitespace character, false otherwise
  */
 function isValidIdentifierValue (value: string): boolean {
-  if (typeof value !== 'string' || value.length === 0) {
-    return false
-  }
-
-  // Must contain at least one non-whitespace character
-  return value.trim().length > 0
+  return isNotEmptyString(value)
 }
 
 /**
@@ -101,40 +97,43 @@ function validateAuthConfiguration (config: unknown): boolean {
     return false
   }
 
-  const authConfig = config as AuthConfiguration
+  const authConfiguration = config as AuthConfiguration
 
   // Validate required boolean fields exist
   if (
-    typeof authConfig.authorizationCacheEnabled !== 'boolean' ||
-    typeof authConfig.localAuthListEnabled !== 'boolean' ||
-    typeof authConfig.offlineAuthorizationEnabled !== 'boolean' ||
-    typeof authConfig.allowOfflineTxForUnknownId !== 'boolean' ||
-    typeof authConfig.localPreAuthorize !== 'boolean' ||
-    typeof authConfig.certificateAuthEnabled !== 'boolean'
+    typeof authConfiguration.authorizationCacheEnabled !== 'boolean' ||
+    typeof authConfiguration.localAuthListEnabled !== 'boolean' ||
+    typeof authConfiguration.offlineAuthorizationEnabled !== 'boolean' ||
+    typeof authConfiguration.allowOfflineTxForUnknownId !== 'boolean' ||
+    typeof authConfiguration.localPreAuthorize !== 'boolean' ||
+    typeof authConfiguration.certificateAuthEnabled !== 'boolean'
   ) {
     return false
   }
 
   // Validate authorization timeout (required, must be positive)
-  if (typeof authConfig.authorizationTimeout !== 'number' || authConfig.authorizationTimeout <= 0) {
+  if (
+    typeof authConfiguration.authorizationTimeout !== 'number' ||
+    authConfiguration.authorizationTimeout <= 0
+  ) {
     return false
   }
 
   // Validate optional cache lifetime if provided
   if (
-    authConfig.authorizationCacheLifetime !== undefined &&
-    (typeof authConfig.authorizationCacheLifetime !== 'number' ||
-      authConfig.authorizationCacheLifetime < 0)
+    authConfiguration.authorizationCacheLifetime !== undefined &&
+    (typeof authConfiguration.authorizationCacheLifetime !== 'number' ||
+      authConfiguration.authorizationCacheLifetime < 0)
   ) {
     return false
   }
 
   // Validate optional max cache entries if provided
   if (
-    authConfig.maxCacheEntries !== undefined &&
-    (typeof authConfig.maxCacheEntries !== 'number' ||
-      authConfig.maxCacheEntries < 1 ||
-      !Number.isInteger(authConfig.maxCacheEntries))
+    authConfiguration.maxCacheEntries !== undefined &&
+    (typeof authConfiguration.maxCacheEntries !== 'number' ||
+      authConfiguration.maxCacheEntries < 1 ||
+      !Number.isInteger(authConfiguration.maxCacheEntries))
   ) {
     return false
   }
@@ -143,8 +142,8 @@ function validateAuthConfiguration (config: unknown): boolean {
 }
 
 /**
- * Validate unified identifier format and constraints
- * @param identifier - Unified identifier object to validate (may be any type)
+ * Validate identifier format and constraints
+ * @param identifier - Identifier object to validate (may be any type)
  * @returns True if the identifier has a valid type and value within OCPP length constraints, false otherwise
  */
 function validateIdentifier (identifier: unknown): boolean {
@@ -153,14 +152,14 @@ function validateIdentifier (identifier: unknown): boolean {
     return false
   }
 
-  const unifiedIdentifier = identifier as UnifiedIdentifier
+  const typedIdentifier = identifier as Identifier
 
-  if (!unifiedIdentifier.value) {
+  if (!typedIdentifier.value) {
     return false
   }
 
   // Check length constraints based on identifier type
-  switch (unifiedIdentifier.type) {
+  switch (typedIdentifier.type) {
     case IdentifierType.BIOMETRIC:
     // Fallthrough intentional: all these OCPP 2.0 types share the same validation
     case IdentifierType.CENTRAL:
@@ -175,11 +174,12 @@ function validateIdentifier (identifier: unknown): boolean {
     case IdentifierType.NO_AUTHORIZATION:
       // OCPP 2.0 types - use IdToken max length
       return (
-        unifiedIdentifier.value.length > 0 && unifiedIdentifier.value.length <= MAX_IDTOKEN_LENGTH
+        isNotEmptyString(typedIdentifier.value) &&
+        typedIdentifier.value.length <= MAX_IDTOKEN_LENGTH
       )
     case IdentifierType.ID_TAG:
       return (
-        unifiedIdentifier.value.length > 0 && unifiedIdentifier.value.length <= MAX_IDTAG_LENGTH
+        isNotEmptyString(typedIdentifier.value) && typedIdentifier.value.length <= MAX_IDTAG_LENGTH
       )
 
     default:

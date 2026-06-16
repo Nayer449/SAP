@@ -1,4 +1,6 @@
 {
+  "$schemaVersion": 1,
+  "idTagsFile": "idtags.json",
   "baseName": "CS-BASIC",
   "chargePointModel": "Simulator simple",
   "chargePointVendor": "Ovomaltin",
@@ -61,6 +63,7 @@
     "0": {},
     "1": {
       "bootStatus": "Available",
+      "maximumPower": 50000,
       "MeterValues": [
         {
           "unit": "Percent",
@@ -76,6 +79,7 @@
     },
     "2": {
       "bootStatus": "Available",
+      "maximumPower": 50000,
       "MeterValues": [
         {
           "unit": "Percent",
@@ -120,7 +124,8 @@
       ]
     },
     "5": {
-      "bootStatus": "Available",
+      "bootStatus": "Faulted",
+      "maximumPower": 50000,
       "MeterValues": [
         {
           "unit": "Percent",

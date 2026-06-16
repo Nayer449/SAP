@@ -8,9 +8,11 @@ import { afterEach, beforeEach, describe, it } from 'node:test'
 
 import type { ResetRequest } from '../../../../src/types/index.js'
 
-import { GenericStatus } from '../../../../src/types/index.js'
-import { ResetType } from '../../../../src/types/ocpp/1.6/Requests.js'
-import { standardCleanup } from '../../../helpers/TestLifecycleHelpers.js'
+import { GenericStatus, ResetType } from '../../../../src/types/index.js'
+import {
+  setupConnectorWithTransaction,
+  standardCleanup,
+} from '../../../helpers/TestLifecycleHelpers.js'
 import {
   createOCPP16IncomingRequestTestContext,
   type OCPP16IncomingRequestTestContext,
@@ -71,11 +73,7 @@ await describe('OCPP16IncomingRequestService — Reset', async () => {
     // Arrange
     const { testableService } = testContext
     const station = ResetFixtures.createStandardStation(1)
-    const connector = station.getConnectorStatus(1)
-    if (connector != null) {
-      connector.transactionStarted = true
-      connector.transactionId = 1
-    }
+    setupConnectorWithTransaction(station, 1, { transactionId: 1 })
 
     const resetRequest: ResetRequest = {
       type: ResetType.HARD,
@@ -96,11 +94,7 @@ await describe('OCPP16IncomingRequestService — Reset', async () => {
     // Arrange
     const { testableService } = testContext
     const station = ResetFixtures.createStandardStation(1)
-    const connector = station.getConnectorStatus(1)
-    if (connector != null) {
-      connector.transactionStarted = true
-      connector.transactionId = 1
-    }
+    setupConnectorWithTransaction(station, 1, { transactionId: 1 })
 
     const resetRequest: ResetRequest = {
       type: ResetType.SOFT,

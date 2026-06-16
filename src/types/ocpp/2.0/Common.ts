@@ -66,23 +66,6 @@ export enum DeleteCertificateStatusEnumType {
   NotFound = 'NotFound',
 }
 
-export enum FirmwareStatusEnumType {
-  Downloaded = 'Downloaded',
-  DownloadFailed = 'DownloadFailed',
-  Downloading = 'Downloading',
-  DownloadPaused = 'DownloadPaused',
-  DownloadScheduled = 'DownloadScheduled',
-  Idle = 'Idle',
-  InstallationFailed = 'InstallationFailed',
-  Installed = 'Installed',
-  Installing = 'Installing',
-  InstallRebooting = 'InstallRebooting',
-  InstallScheduled = 'InstallScheduled',
-  InstallVerificationFailed = 'InstallVerificationFailed',
-  InvalidSignature = 'InvalidSignature',
-  SignatureVerified = 'SignatureVerified',
-}
-
 export enum GenericDeviceModelStatusEnumType {
   Accepted = 'Accepted',
   EmptyResultSet = 'EmptyResultSet',
@@ -198,6 +181,7 @@ export enum OCPP20ComponentName {
   EVRetentionLock = 'EVRetentionLock',
   EVSE = 'EVSE',
   ExternalTemperatureSensor = 'ExternalTemperatureSensor',
+  FirmwareCtrlr = 'FirmwareCtrlr',
   FiscalMetering = 'FiscalMetering',
   FloodSensor = 'FloodSensor',
   GroundIsolationProtection = 'GroundIsolationProtection',
@@ -233,6 +217,28 @@ export enum OCPP20ComponentName {
   UIInput = 'UIInput',
   UpstreamProtectionTrigger = 'UpstreamProtectionTrigger',
   VehicleIdSensor = 'VehicleIdSensor',
+}
+
+export enum OCPP20FirmwareStatusEnumType {
+  Downloaded = 'Downloaded',
+  DownloadFailed = 'DownloadFailed',
+  Downloading = 'Downloading',
+  DownloadPaused = 'DownloadPaused',
+  DownloadScheduled = 'DownloadScheduled',
+  Idle = 'Idle',
+  InstallationFailed = 'InstallationFailed',
+  Installed = 'Installed',
+  Installing = 'Installing',
+  InstallRebooting = 'InstallRebooting',
+  InstallScheduled = 'InstallScheduled',
+  InstallVerificationFailed = 'InstallVerificationFailed',
+  InvalidSignature = 'InvalidSignature',
+  SignatureVerified = 'SignatureVerified',
+}
+
+export enum OCPP20OperationalStatusEnumType {
+  Inoperative = 'Inoperative',
+  Operative = 'Operative',
 }
 
 export enum OCPP20UnitEnumType {
@@ -295,11 +301,6 @@ export enum OCPPVersionEnumType {
   OCPP20 = 'OCPP20',
 }
 
-export enum OperationalStatusEnumType {
-  Inoperative = 'Inoperative',
-  Operative = 'Operative',
-}
-
 export enum ReasonCodeEnumType {
   CSNotAccepted = 'CSNotAccepted',
   DuplicateProfile = 'DuplicateProfile',
@@ -308,9 +309,11 @@ export enum ReasonCodeEnumType {
   FwUpdateInProgress = 'FwUpdateInProgress',
   InternalError = 'InternalError',
   InvalidCertificate = 'InvalidCertificate',
+  InvalidConfSlot = 'InvalidConfSlot',
   InvalidCSR = 'InvalidCSR',
   InvalidIdToken = 'InvalidIdToken',
   InvalidMessageSeq = 'InvalidMessageSeq',
+  InvalidNetworkConf = 'InvalidNetworkConf',
   InvalidProfile = 'InvalidProfile',
   InvalidSchedule = 'InvalidSchedule',
   InvalidStackLevel = 'InvalidStackLevel',
@@ -320,8 +323,10 @@ export enum ReasonCodeEnumType {
   MissingParam = 'MissingParam',
   NoCable = 'NoCable',
   NoError = 'NoError',
+  NoSecurityDowngrade = 'NoSecurityDowngrade',
   NotEnabled = 'NotEnabled',
   NotFound = 'NotFound',
+  NotSupported = 'NotSupported',
   OutOfMemory = 'OutOfMemory',
   OutOfStorage = 'OutOfStorage',
   ReadOnly = 'ReadOnly',

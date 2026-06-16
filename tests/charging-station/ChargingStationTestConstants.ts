@@ -16,7 +16,7 @@ export const TEST_CHARGING_STATION_BASE_NAME = 'CS-TEST'
 export const TEST_CHARGING_STATION_HASH_ID = 'cs-test-hash-001'
 
 /**
- * Timer Intervals (seconds)
+ * Timer Intervals
  * Test values for timing-related configuration and expectations
  */
 export const TEST_HEARTBEAT_INTERVAL_SECONDS = 60
@@ -63,6 +63,8 @@ export const TEST_ID_TAG_BLOCKED = 'BLOCKED_TAG'
  * Test values for transaction-related operations
  */
 export const TEST_TRANSACTION_ID = 1
+export const TEST_TRANSACTION_ID_STRING = 'tx-ocpp20-1'
+export const TEST_TRANSACTION_UUID = '00000000-0000-0000-0000-000000000001'
 export const TEST_TRANSACTION_ENERGY_WH = 5000
 
 /**
@@ -92,6 +94,7 @@ export const TEST_RATE_LIMIT_WINDOW_MS = 1000
  */
 export const TEST_CUSTOM_HEARTBEAT_INTERVAL_SECONDS = 120
 export const TEST_REJECTED_HEARTBEAT_INTERVAL_SECONDS = TEST_ONE_HOUR_SECONDS
+export const TEST_RESERVATION_EXPIRY_MS = TEST_ONE_HOUR_MS
 
 /**
  * OCPP 2.0 Value Size Limits
@@ -99,3 +102,10 @@ export const TEST_REJECTED_HEARTBEAT_INTERVAL_SECONDS = TEST_ONE_HOUR_SECONDS
  */
 export const TEST_VALUE_SIZE_LIMIT = 120
 export const TEST_CONFIGURATION_VALUE_SIZE = 60
+
+/**
+ * Fiscal Metering / Signed Meter Values
+ * secp256k1 EC public key from OCA Application Note §5.3
+ */
+export const TEST_PUBLIC_KEY_HEX =
+  '3056301006072a8648ce3d020106052b8104000a03420004460a02ba2766d9c44f023ecc0e4e58644a87add1aadd6317e5fe4dccdb29b163a01d8a6297c84bc530f86431e92f8d46ab37830247c05cbd92fac252929e7f61'

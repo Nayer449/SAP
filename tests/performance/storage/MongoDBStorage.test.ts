@@ -6,8 +6,7 @@ import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 
 import { MongoDBStorage } from '../../../src/performance/storage/MongoDBStorage.js'
-import { Constants } from '../../../src/utils/index.js'
-import { logger } from '../../../src/utils/Logger.js'
+import { Constants, logger } from '../../../src/utils/index.js'
 import { standardCleanup } from '../../helpers/TestLifecycleHelpers.js'
 import { buildTestStatistics } from './StorageTestHelpers.js'
 
@@ -38,7 +37,7 @@ class TestableMongoDBStorage extends MongoDBStorage {
   }
 
   public getOpened (): boolean {
-    return Reflect.get(this, 'opened') as boolean
+    return Reflect.get(this, 'opened')
   }
 
   public setClient (client: MockMongoClient): void {
@@ -85,8 +84,8 @@ function buildMockMongoClient (): {
     },
   }
   const mockClient: MockMongoClient = {
-    close: () => Promise.resolve(),
-    connect: () => Promise.resolve(),
+    close: async () => Promise.resolve(),
+    connect: async () => Promise.resolve(),
     db: (_name: string) => mockDb,
   }
   return { collectionCalls, mockClient, replaceOneCalls }
@@ -179,8 +178,8 @@ await describe('MongoDBStorage', async () => {
       // Arrange
       const errorMock = t.mock.method(logger, 'error')
       const failingClient: MockMongoClient = {
-        close: () => Promise.reject(new Error('close failed')),
-        connect: () => Promise.resolve(),
+        close: async () => Promise.reject(new Error('close failed')),
+        connect: async () => Promise.resolve(),
         db: () => ({}) as MockDb,
       }
       storage.setClient(failingClient)
@@ -227,8 +226,8 @@ await describe('MongoDBStorage', async () => {
       // Arrange
       const errorMock = t.mock.method(logger, 'error')
       const failingClient: MockMongoClient = {
-        close: () => Promise.resolve(),
-        connect: () => Promise.reject(new Error('connect failed')),
+        close: async () => Promise.resolve(),
+        connect: async () => Promise.reject(new Error('connect failed')),
         db: () => ({}) as MockDb,
       }
       storage.setClient(failingClient)
@@ -350,7 +349,7 @@ await describe('MongoDBStorage', async () => {
       stats.statisticsData.set('StatusNotification', {
         requestCount: 50,
         responseCount: 50,
-      } as unknown as Record<string, unknown>)
+      })
 
       // Act
       await storage.storePerformanceStatistics(stats)
@@ -391,12 +390,12 @@ await describe('MongoDBStorage', async () => {
       // Arrange
       const errorMock = t.mock.method(logger, 'error')
       const failingCollection: MockCollection = {
-        replaceOne: () => Promise.reject(new Error('replaceOne failed')),
+        replaceOne: async () => Promise.reject(new Error('replaceOne failed')),
       }
       const failingClient: MockMongoClient = {
-        close: () => Promise.resolve(),
-        connect: () => Promise.resolve(),
-        db: () => ({ collection: () => failingCollection }) as unknown as MockDb,
+        close: async () => Promise.resolve(),
+        connect: async () => Promise.resolve(),
+        db: () => ({ collection: () => failingCollection }),
       }
       storage.setClient(failingClient)
       storage.setOpened(true)

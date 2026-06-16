@@ -4,14 +4,15 @@
  */
 import assert from 'node:assert/strict'
 
-import type { ChargingStation } from '../../../../../src/charging-station/ChargingStation.js'
+import type { ChargingStation } from '../../../../../src/charging-station/index.js'
 import type {
   AuthCache,
-  LocalAuthEntry,
   LocalAuthListManager,
   OCPPAuthAdapter,
   OCPPAuthService,
 } from '../../../../../src/charging-station/ocpp/auth/interfaces/OCPPAuthService.js'
+import type { OCPPAuthServiceImpl } from '../../../../../src/charging-station/ocpp/auth/services/OCPPAuthServiceImpl.js'
+import type { LocalAuthStrategy } from '../../../../../src/charging-station/ocpp/auth/strategies/LocalAuthStrategy.js'
 
 import {
   type AuthConfiguration,
@@ -20,10 +21,15 @@ import {
   type AuthorizationResult,
   AuthorizationStatus,
   type AuthRequest,
+  type Identifier,
   IdentifierType,
-  type UnifiedIdentifier,
 } from '../../../../../src/charging-station/ocpp/auth/types/AuthTypes.js'
-import { OCPPVersion } from '../../../../../src/types/ocpp/OCPPVersion.js'
+import {
+  OCPP20IdTokenEnumType,
+  type OCPP20IdTokenType,
+  OCPPVersion,
+} from '../../../../../src/types/index.js'
+import { TEST_ID_TAG } from '../../../ChargingStationTestConstants.js'
 
 /**
  * Factory functions for creating test mocks and fixtures
@@ -31,18 +37,15 @@ import { OCPPVersion } from '../../../../../src/types/ocpp/OCPPVersion.js'
  */
 
 /**
- * Create a mock UnifiedIdentifier for any OCPP version.
- * @param ocppVersion - OCPP version (defaults to VERSION_16)
- * @param value - Identifier token value (defaults to 'TEST-TAG-001')
+ * Create a mock Identifier for any OCPP version.
+ * @param value - Identifier token value (defaults to TEST_ID_TAG)
  * @param type - Identifier type enum value (defaults to ID_TAG)
- * @returns Mock UnifiedIdentifier configured for specified OCPP version
+ * @returns Mock Identifier configured for testing
  */
 export const createMockIdentifier = (
-  ocppVersion: OCPPVersion = OCPPVersion.VERSION_16,
-  value = 'TEST-TAG-001',
+  value = TEST_ID_TAG,
   type: IdentifierType = IdentifierType.ID_TAG
-): UnifiedIdentifier => ({
-  ocppVersion,
+): Identifier => ({
   type,
   value,
 })
@@ -123,23 +126,21 @@ export const createMockAuthService = (overrides?: Partial<OCPPAuthService>): OCP
       /* empty */
     },
     getConfiguration: () => ({}) as AuthConfiguration,
-    getStats: () =>
-      new Promise<Record<string, unknown>>(resolve => {
-        resolve({
-          avgResponseTime: 0,
-          cacheHitRate: 0,
-          failedAuth: 0,
-          lastUpdated: new Date(),
-          localUsageRate: 1,
-          remoteSuccessRate: 0,
-          successfulAuth: 0,
-          totalRequests: 0,
-        })
-      }),
+    getLocalAuthListManager: () => undefined,
+    getStats: () => ({
+      avgResponseTime: 0,
+      cacheHitRate: 0,
+      failedAuth: 0,
+      lastUpdatedDate: new Date(),
+      localUsageRate: 1,
+      remoteSuccessRate: 0,
+      successfulAuth: 0,
+      totalRequests: 0,
+    }),
     invalidateCache: () => {
       /* empty */
     },
-    isLocallyAuthorized: (_identifier: UnifiedIdentifier, _connectorId?: number) =>
+    isLocallyAuthorized: (_identifier: Identifier, _connectorId?: number) =>
       new Promise<AuthorizationResult | undefined>(resolve => {
         resolve(undefined)
       }),
@@ -196,7 +197,7 @@ export const createMockOCPPAdapter = (
   ocppVersion: OCPPVersion,
   overrides?: Partial<OCPPAuthAdapter>
 ): OCPPAuthAdapter => ({
-  authorizeRemote: (_identifier: UnifiedIdentifier) =>
+  authorizeRemote: (_identifier: Identifier) =>
     new Promise<AuthorizationResult>(resolve => {
       resolve(
         createMockAuthorizationResult({
@@ -204,19 +205,16 @@ export const createMockOCPPAdapter = (
         })
       )
     }),
-  convertFromUnifiedIdentifier: (identifier: UnifiedIdentifier) =>
+  convertFromIdentifier: (identifier: Identifier) =>
     ocppVersion === OCPPVersion.VERSION_16
       ? identifier.value
-      : { idToken: identifier.value, type: identifier.type },
-  convertToUnifiedIdentifier: (identifier: object | string) => ({
-    ocppVersion,
+      : { idToken: identifier.value, type: OCPP20IdTokenEnumType.Central },
+  convertToIdentifier: (identifier: OCPP20IdTokenType | string) => ({
     type: IdentifierType.ID_TAG,
-    value:
-      typeof identifier === 'string'
-        ? identifier
-        : ((identifier as { idToken?: string }).idToken ?? 'unknown'),
+    value: typeof identifier === 'string' ? identifier : identifier.idToken,
   }),
   getConfigurationSchema: () => ({}),
+  getMaxLocalAuthListEntries: () => undefined,
   isRemoteAvailable: () => true,
   ocppVersion,
   validateConfiguration: (_config: AuthConfiguration) => true,
@@ -301,6 +299,7 @@ export const createMockAuthServiceTestStation = (
   ({
     getConnectorStatus: () => ({ status: 'Available' }),
     idTagLocalAuthorized: () => false,
+    inAcceptedState: () => true,
     isConnected: () => true,
     logPrefix: () => `[TEST-CS-${id}]`,
     sendRequest: () =>
@@ -321,38 +320,40 @@ export const createMockAuthServiceTestStation = (
 /**
  * Create a mock LocalAuthListManager for testing.
  * @param overrides - Partial LocalAuthListManager methods to override defaults
- * @returns Mock LocalAuthListManager with stubbed async methods
+ * @returns Mock LocalAuthListManager with stubbed methods
  */
 export const createMockLocalAuthListManager = (
   overrides?: Partial<LocalAuthListManager>
 ): LocalAuthListManager => ({
-  addEntry: () =>
-    new Promise<void>(resolve => {
-      resolve()
-    }),
-  clearAll: () =>
-    new Promise<void>(resolve => {
-      resolve()
-    }),
-  getAllEntries: () =>
-    new Promise<LocalAuthEntry[]>(resolve => {
-      resolve([])
-    }),
-  getEntry: () =>
-    new Promise<LocalAuthEntry | undefined>(resolve => {
-      resolve(undefined)
-    }),
-  getVersion: () =>
-    new Promise<number>(resolve => {
-      resolve(1)
-    }),
-  removeEntry: () =>
-    new Promise<void>(resolve => {
-      resolve()
-    }),
-  updateVersion: () =>
-    new Promise<void>(resolve => {
-      resolve()
-    }),
+  addEntry: () => {
+    /* empty */
+  },
+  applyDifferentialUpdate: () => {
+    /* empty */
+  },
+  clearAll: () => {
+    /* empty */
+  },
+  getAllEntries: () => [],
+  getEntry: () => undefined,
+  getVersion: () => 1,
+  removeEntry: () => {
+    /* empty */
+  },
+  setEntries: () => {
+    /* empty */
+  },
+  updateVersion: () => {
+    /* empty */
+  },
   ...overrides,
 })
+
+export const getTestAuthCache = (authService: OCPPAuthService): AuthCache => {
+  const localStrategy = (authService as OCPPAuthServiceImpl).getStrategy('local') as
+    | LocalAuthStrategy
+    | undefined
+  const cache = localStrategy?.getAuthCache()
+  assert.ok(cache != null, 'Auth cache must be available for test')
+  return cache
+}

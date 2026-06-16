@@ -5,12 +5,18 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 
-import type { ChargingStation } from '../../src/charging-station/ChargingStation.js'
+import type { ChargingStation } from '../../src/charging-station/index.js'
 
+import { OCPP16ServiceUtils } from '../../src/charging-station/ocpp/index.js'
+import { OCPP20ServiceUtils } from '../../src/charging-station/ocpp/index.js'
 import { OCPPVersion } from '../../src/types/index.js'
-import { standardCleanup, withMockTimers } from '../helpers/TestLifecycleHelpers.js'
+import {
+  setupConnectorWithTransaction,
+  standardCleanup,
+  withMockTimers,
+} from '../helpers/TestLifecycleHelpers.js'
 import { TEST_HEARTBEAT_INTERVAL_MS, TEST_ID_TAG } from './ChargingStationTestConstants.js'
-import { cleanupChargingStation, createMockChargingStation } from './ChargingStationTestUtils.js'
+import { cleanupChargingStation, createMockChargingStation } from './helpers/StationHelpers.js'
 
 await describe('ChargingStation Transaction Management', async () => {
   await describe('Transaction Query', async () => {
@@ -42,12 +48,7 @@ await describe('ChargingStation Transaction Management', async () => {
       // Arrange
       const result = createMockChargingStation({ connectorsCount: 2 })
       station = result.station
-      const connector1 = station.getConnectorStatus(1)
-      if (connector1 != null) {
-        connector1.transactionStarted = true
-        connector1.transactionId = 100
-        connector1.transactionIdTag = TEST_ID_TAG
-      }
+      setupConnectorWithTransaction(station, 1, { idTag: TEST_ID_TAG, transactionId: 100 })
 
       // Act
       const connectorId = station.getConnectorIdByTransactionId(100)
@@ -96,12 +97,7 @@ await describe('ChargingStation Transaction Management', async () => {
       })
       station = result.station
       // Get connector in EVSE 1
-      const connector1 = station.getConnectorStatus(1)
-      if (connector1 != null) {
-        connector1.transactionStarted = true
-        connector1.transactionId = 200
-        connector1.transactionIdTag = TEST_ID_TAG
-      }
+      setupConnectorWithTransaction(station, 1, { idTag: TEST_ID_TAG, transactionId: 200 })
 
       // Act
       const evseId = station.getEvseIdByTransactionId(200)
@@ -114,12 +110,7 @@ await describe('ChargingStation Transaction Management', async () => {
       // Arrange
       const result = createMockChargingStation({ connectorsCount: 2 })
       station = result.station
-      const connector1 = station.getConnectorStatus(1)
-      if (connector1 != null) {
-        connector1.transactionStarted = true
-        connector1.transactionId = 300
-        connector1.transactionIdTag = 'MY-TAG-123'
-      }
+      setupConnectorWithTransaction(station, 1, { idTag: 'MY-TAG-123', transactionId: 300 })
 
       // Act
       const idTag = station.getTransactionIdTag(300)
@@ -299,28 +290,21 @@ await describe('ChargingStation Transaction Management', async () => {
       station = result.station
 
       // Set up transactions on connectors 1, 2, and 3
-      const connector1 = station.getConnectorStatus(1)
-      const connector2 = station.getConnectorStatus(2)
-      const connector3 = station.getConnectorStatus(3)
-
-      if (connector1 != null) {
-        connector1.transactionStarted = true
-        connector1.transactionId = 100
-        connector1.transactionIdTag = 'TAG-A'
-        connector1.transactionEnergyActiveImportRegisterValue = 10000
-      }
-      if (connector2 != null) {
-        connector2.transactionStarted = true
-        connector2.transactionId = 101
-        connector2.transactionIdTag = 'TAG-B'
-        connector2.transactionEnergyActiveImportRegisterValue = 20000
-      }
-      if (connector3 != null) {
-        connector3.transactionStarted = true
-        connector3.transactionId = 102
-        connector3.transactionIdTag = 'TAG-C'
-        connector3.transactionEnergyActiveImportRegisterValue = 30000
-      }
+      setupConnectorWithTransaction(station, 1, {
+        energyImport: 10000,
+        idTag: 'TAG-A',
+        transactionId: 100,
+      })
+      setupConnectorWithTransaction(station, 2, {
+        energyImport: 20000,
+        idTag: 'TAG-B',
+        transactionId: 101,
+      })
+      setupConnectorWithTransaction(station, 3, {
+        energyImport: 30000,
+        idTag: 'TAG-C',
+        transactionId: 102,
+      })
 
       // Act & Assert - Running transactions count
       assert.strictEqual(station.getNumberOfRunningTransactions(), 3)
@@ -350,21 +334,16 @@ await describe('ChargingStation Transaction Management', async () => {
       station = result.station
 
       // Set up transaction on connector 1 (EVSE 1) and connector 3 (EVSE 2)
-      const connector1 = station.getConnectorStatus(1)
-      const connector3 = station.getConnectorStatus(3)
-
-      if (connector1 != null) {
-        connector1.transactionStarted = true
-        connector1.transactionId = 500
-        connector1.transactionIdTag = 'EVSE1-TAG'
-        connector1.transactionEnergyActiveImportRegisterValue = 15000
-      }
-      if (connector3 != null) {
-        connector3.transactionStarted = true
-        connector3.transactionId = 501
-        connector3.transactionIdTag = 'EVSE2-TAG'
-        connector3.transactionEnergyActiveImportRegisterValue = 18000
-      }
+      setupConnectorWithTransaction(station, 1, {
+        energyImport: 15000,
+        idTag: 'EVSE1-TAG',
+        transactionId: 500,
+      })
+      setupConnectorWithTransaction(station, 3, {
+        energyImport: 18000,
+        idTag: 'EVSE2-TAG',
+        transactionId: 501,
+      })
 
       // Act & Assert - Running transactions count
       assert.strictEqual(station.getNumberOfRunningTransactions(), 2)
@@ -416,12 +395,7 @@ await describe('ChargingStation Transaction Management', async () => {
       })
       station = result.station
 
-      const connector2 = station.getConnectorStatus(2)
-      if (connector2 != null) {
-        connector2.transactionStarted = true
-        connector2.transactionId = 600
-        connector2.transactionIdTag = 'EVSE-MODE-TAG'
-      }
+      setupConnectorWithTransaction(station, 2, { idTag: 'EVSE-MODE-TAG', transactionId: 600 })
 
       // Act
       const idTag = station.getTransactionIdTag(600)
@@ -500,7 +474,7 @@ await describe('ChargingStation Transaction Management', async () => {
         // Assert - interval should be different (old cleared, new created)
         assert.notStrictEqual(secondInterval, undefined)
         assert.strictEqual(typeof secondInterval, 'object')
-        assert.ok(firstInterval !== secondInterval)
+        assert.notStrictEqual(firstInterval, secondInterval)
       })
     })
 
@@ -536,12 +510,12 @@ await describe('ChargingStation Transaction Management', async () => {
         }
 
         // Act
-        station.startMeterValues(1, 10000)
+        OCPP16ServiceUtils.startUpdatedMeterValues(station, 1, 10000)
 
         // Assert - meter values interval should be created
         if (connector1 != null) {
-          assert.notStrictEqual(connector1.transactionSetInterval, undefined)
-          assert.strictEqual(typeof connector1.transactionSetInterval, 'object')
+          assert.notStrictEqual(connector1.transactionUpdatedMeterValuesSetInterval, undefined)
+          assert.strictEqual(typeof connector1.transactionUpdatedMeterValuesSetInterval, 'object')
         }
       })
     })
@@ -556,17 +530,18 @@ await describe('ChargingStation Transaction Management', async () => {
           connector1.transactionStarted = true
           connector1.transactionId = 100
         }
-        station.startMeterValues(1, 10000)
-        const firstInterval = connector1?.transactionSetInterval
+        OCPP16ServiceUtils.startUpdatedMeterValues(station, 1, 10000)
+        const firstInterval = connector1?.transactionUpdatedMeterValuesSetInterval
 
         // Act
-        station.restartMeterValues(1, 15000)
-        const secondInterval = connector1?.transactionSetInterval
+        OCPP16ServiceUtils.stopUpdatedMeterValues(station, 1)
+        OCPP16ServiceUtils.startUpdatedMeterValues(station, 1, 15000)
+        const secondInterval = connector1?.transactionUpdatedMeterValuesSetInterval
 
         // Assert - interval should be different
         assert.notStrictEqual(secondInterval, undefined)
         assert.strictEqual(typeof secondInterval, 'object')
-        assert.ok(firstInterval !== secondInterval)
+        assert.notStrictEqual(firstInterval, secondInterval)
       })
     })
 
@@ -580,13 +555,13 @@ await describe('ChargingStation Transaction Management', async () => {
           connector1.transactionStarted = true
           connector1.transactionId = 100
         }
-        station.startMeterValues(1, 10000)
+        OCPP16ServiceUtils.startUpdatedMeterValues(station, 1, 10000)
 
         // Act
-        station.stopMeterValues(1)
+        OCPP16ServiceUtils.stopUpdatedMeterValues(station, 1)
 
         // Assert - interval should be cleared
-        assert.strictEqual(connector1?.transactionSetInterval, undefined)
+        assert.strictEqual(connector1?.transactionUpdatedMeterValuesSetInterval, undefined)
       })
     })
 
@@ -605,12 +580,12 @@ await describe('ChargingStation Transaction Management', async () => {
         }
 
         // Act
-        station.startTxUpdatedInterval(1, 5000)
+        OCPP20ServiceUtils.startUpdatedMeterValues(station, 1, 5000)
 
         // Assert - transaction updated interval should be created
         if (connector1 != null) {
-          assert.notStrictEqual(connector1.transactionTxUpdatedSetInterval, undefined)
-          assert.strictEqual(typeof connector1.transactionTxUpdatedSetInterval, 'object')
+          assert.notStrictEqual(connector1.transactionUpdatedMeterValuesSetInterval, undefined)
+          assert.strictEqual(typeof connector1.transactionUpdatedMeterValuesSetInterval, 'object')
         }
       })
     })
@@ -628,13 +603,117 @@ await describe('ChargingStation Transaction Management', async () => {
           connector1.transactionStarted = true
           connector1.transactionId = 100
         }
-        station.startTxUpdatedInterval(1, 5000)
+        OCPP20ServiceUtils.startUpdatedMeterValues(station, 1, 5000)
 
         // Act
-        station.stopTxUpdatedInterval(1)
+        OCPP20ServiceUtils.stopUpdatedMeterValues(station, 1)
 
         // Assert - interval should be cleared
-        assert.strictEqual(connector1?.transactionTxUpdatedSetInterval, undefined)
+        assert.strictEqual(connector1?.transactionUpdatedMeterValuesSetInterval, undefined)
+      })
+    })
+
+    await it('should restart transaction updated interval for OCPP 2.0', async t => {
+      await withMockTimers(t, ['setInterval'], () => {
+        // Arrange
+        const result = createMockChargingStation({
+          connectorsCount: 2,
+          ocppVersion: OCPPVersion.VERSION_20,
+        })
+        station = result.station
+        const connector1 = station.getConnectorStatus(1)
+        if (connector1 != null) {
+          connector1.transactionStarted = true
+          connector1.transactionId = 100
+        }
+        OCPP20ServiceUtils.startUpdatedMeterValues(station, 1, 5000)
+        const firstInterval = connector1?.transactionUpdatedMeterValuesSetInterval
+
+        // Act
+        OCPP20ServiceUtils.stopUpdatedMeterValues(station, 1)
+        OCPP20ServiceUtils.startUpdatedMeterValues(station, 1, 8000)
+        const secondInterval = connector1?.transactionUpdatedMeterValuesSetInterval
+
+        // Assert - interval should be different
+        assert.notStrictEqual(secondInterval, undefined)
+        assert.strictEqual(typeof secondInterval, 'object')
+        assert.notStrictEqual(firstInterval, secondInterval)
+      })
+    })
+
+    await it('should create transaction ended interval when startEndedMeterValues() is called for OCPP 2.0', async t => {
+      await withMockTimers(t, ['setInterval'], () => {
+        // Arrange
+        const result = createMockChargingStation({
+          connectorsCount: 2,
+          ocppVersion: OCPPVersion.VERSION_20,
+        })
+        station = result.station
+        const connector1 = station.getConnectorStatus(1)
+        if (connector1 != null) {
+          connector1.transactionStarted = true
+          connector1.transactionId = 100
+        }
+
+        // Act
+        OCPP20ServiceUtils.startEndedMeterValues(station, 1, 5000)
+
+        // Assert
+        if (connector1 != null) {
+          assert.notStrictEqual(connector1.transactionEndedMeterValuesSetInterval, undefined)
+          assert.strictEqual(typeof connector1.transactionEndedMeterValuesSetInterval, 'object')
+          assert.ok(Array.isArray(connector1.transactionEndedMeterValues))
+          assert.strictEqual(connector1.transactionEndedMeterValues.length, 0)
+        }
+      })
+    })
+
+    await it('should clear transaction ended interval when stopEndedMeterValues() is called', async t => {
+      await withMockTimers(t, ['setInterval'], () => {
+        // Arrange
+        const result = createMockChargingStation({
+          connectorsCount: 2,
+          ocppVersion: OCPPVersion.VERSION_20,
+        })
+        station = result.station
+        const connector1 = station.getConnectorStatus(1)
+        if (connector1 != null) {
+          connector1.transactionStarted = true
+          connector1.transactionId = 100
+        }
+        OCPP20ServiceUtils.startEndedMeterValues(station, 1, 5000)
+
+        // Act
+        OCPP20ServiceUtils.stopEndedMeterValues(station, 1)
+
+        // Assert
+        assert.strictEqual(connector1?.transactionEndedMeterValuesSetInterval, undefined)
+      })
+    })
+
+    await it('should initialize empty ended meter values array without timer when interval is zero', async t => {
+      await withMockTimers(t, ['setInterval'], () => {
+        // Arrange
+        const result = createMockChargingStation({
+          connectorsCount: 2,
+          ocppVersion: OCPPVersion.VERSION_20,
+        })
+        station = result.station
+        const connector1 = station.getConnectorStatus(1)
+        if (connector1 != null) {
+          connector1.transactionStarted = true
+          connector1.transactionId = 100
+        }
+
+        // Act
+        OCPP20ServiceUtils.startEndedMeterValues(station, 1, 0)
+
+        // Assert
+        if (connector1 != null) {
+          assert.strictEqual(connector1.transactionEndedMeterValuesSetInterval, undefined)
+          assert.ok(Array.isArray(connector1.transactionEndedMeterValues))
+          assert.strictEqual(connector1.transactionEndedMeterValues.length, 0)
+        }
       })
     })
   })

@@ -8,20 +8,19 @@ import type { ChargingStation } from './ChargingStation.js'
 import { BaseError } from '../exception/index.js'
 import { PerformanceStatistics } from '../performance/index.js'
 import {
-  AuthorizationStatus,
   ChargingStationEvents,
-  RequestCommand,
-  type StartTransactionRequest,
-  type StartTransactionResponse,
+  IdTagDistribution,
+  type StartTransactionResult,
   type Status,
   StopTransactionReason,
-  type StopTransactionResponse,
+  type StopTransactionResult,
 } from '../types/index.js'
 import {
   clone,
   Constants,
   convertToDate,
   formatDurationMilliSeconds,
+  isEmpty,
   isValidDate,
   logger,
   logPrefix,
@@ -30,7 +29,13 @@ import {
 } from '../utils/index.js'
 import { checkChargingStationState } from './Helpers.js'
 import { IdTagsCache } from './IdTagsCache.js'
-import { isIdTagAuthorized } from './ocpp/index.js'
+import {
+  isIdTagAuthorized,
+  startTransactionOnConnector,
+  stopTransactionOnConnector,
+} from './ocpp/index.js'
+
+const moduleName = 'AutomaticTransactionGenerator'
 
 export class AutomaticTransactionGenerator {
   private static readonly instances: Map<string, AutomaticTransactionGenerator> = new Map<
@@ -55,23 +60,27 @@ export class AutomaticTransactionGenerator {
   }
 
   public static deleteInstance (chargingStation: ChargingStation): boolean {
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    return AutomaticTransactionGenerator.instances.delete(chargingStation.stationInfo!.hashId)
+    const hashId = chargingStation.stationInfo?.hashId
+    if (hashId == null) {
+      return false
+    }
+    return AutomaticTransactionGenerator.instances.delete(hashId)
   }
 
   public static getInstance (
     chargingStation: ChargingStation
   ): AutomaticTransactionGenerator | undefined {
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    if (!AutomaticTransactionGenerator.instances.has(chargingStation.stationInfo!.hashId)) {
+    const hashId = chargingStation.stationInfo?.hashId
+    if (hashId == null) {
+      return undefined
+    }
+    if (!AutomaticTransactionGenerator.instances.has(hashId)) {
       AutomaticTransactionGenerator.instances.set(
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        chargingStation.stationInfo!.hashId,
+        hashId,
         new AutomaticTransactionGenerator(chargingStation)
       )
     }
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    return AutomaticTransactionGenerator.instances.get(chargingStation.stationInfo!.hashId)
+    return AutomaticTransactionGenerator.instances.get(hashId)
   }
 
   public start (stopAbsoluteDuration?: boolean): void {
@@ -79,11 +88,11 @@ export class AutomaticTransactionGenerator {
       return
     }
     if (this.started) {
-      logger.warn(`${this.logPrefix()} is already started`)
+      logger.warn(`${this.logPrefix()} ${moduleName}.start: Already started`)
       return
     }
     if (this.starting) {
-      logger.warn(`${this.logPrefix()} is already starting`)
+      logger.warn(`${this.logPrefix()} ${moduleName}.start: Already starting`)
       return
     }
     this.starting = true
@@ -97,25 +106,32 @@ export class AutomaticTransactionGenerator {
       return
     }
     if (!this.connectorsStatus.has(connectorId)) {
-      logger.error(`${this.logPrefix(connectorId)} starting on non existing connector`)
+      logger.error(
+        `${this.logPrefix(connectorId)} ${moduleName}.startConnector: Starting on non-existent connector`
+      )
       throw new BaseError(`Connector ${connectorId.toString()} does not exist`)
     }
     if (this.connectorsStatus.get(connectorId)?.start === false) {
       this.internalStartConnector(connectorId, stopAbsoluteDuration).catch((error: unknown) =>
-        logger.error(`${this.logPrefix(connectorId)} Error while starting connector:`, error)
+        logger.error(
+          `${this.logPrefix(connectorId)} ${moduleName}.startConnector: Error while starting connector:`,
+          error
+        )
       )
     } else if (this.connectorsStatus.get(connectorId)?.start === true) {
-      logger.warn(`${this.logPrefix(connectorId)} is already started on connector`)
+      logger.warn(
+        `${this.logPrefix(connectorId)} ${moduleName}.startConnector: Already started on connector`
+      )
     }
   }
 
   public stop (): void {
     if (!this.started) {
-      logger.warn(`${this.logPrefix()} is already stopped`)
+      logger.warn(`${this.logPrefix()} ${moduleName}.stop: Already stopped`)
       return
     }
     if (this.stopping) {
-      logger.warn(`${this.logPrefix()} is already stopping`)
+      logger.warn(`${this.logPrefix()} ${moduleName}.stop: Already stopping`)
       return
     }
     this.stopping = true
@@ -126,24 +142,28 @@ export class AutomaticTransactionGenerator {
 
   public stopConnector (connectorId: number): void {
     if (!this.connectorsStatus.has(connectorId)) {
-      logger.error(`${this.logPrefix(connectorId)} stopping on non existing connector`)
+      logger.error(
+        `${this.logPrefix(connectorId)} ${moduleName}.stopConnector: Stopping on non-existent connector`
+      )
       throw new BaseError(`Connector ${connectorId.toString()} does not exist`)
     }
-    if (this.connectorsStatus.get(connectorId)?.start === true) {
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      this.connectorsStatus.get(connectorId)!.start = false
-    } else if (this.connectorsStatus.get(connectorId)?.start === false) {
-      logger.warn(`${this.logPrefix(connectorId)} is already stopped on connector`)
+    const connectorStatus = this.connectorsStatus.get(connectorId)
+    if (connectorStatus?.start === true) {
+      connectorStatus.start = false
+    } else if (connectorStatus?.start === false) {
+      logger.warn(
+        `${this.logPrefix(connectorId)} ${moduleName}.stopConnector: Already stopped on connector`
+      )
     }
   }
 
   private canStartConnector (connectorId: number): boolean {
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    if (new Date() > this.connectorsStatus.get(connectorId)!.stopDate!) {
+    const stopDate = this.connectorsStatus.get(connectorId)?.stopDate
+    if (stopDate != null && new Date() > stopDate) {
       logger.info(
         `${this.logPrefix(
           connectorId
-        )} entered in transaction loop while the ATG stop date has been reached`
+        )} ${moduleName}.canStartConnector: Entered in transaction loop while the ATG stop date has been reached`
       )
       return false
     }
@@ -151,7 +171,7 @@ export class AutomaticTransactionGenerator {
       logger.error(
         `${this.logPrefix(
           connectorId
-        )} entered in transaction loop while the charging station is not in accepted state`
+        )} ${moduleName}.canStartConnector: Entered in transaction loop while the charging station is not in accepted state`
       )
       return false
     }
@@ -159,7 +179,7 @@ export class AutomaticTransactionGenerator {
       logger.info(
         `${this.logPrefix(
           connectorId
-        )} entered in transaction loop while the charging station is unavailable`
+        )} ${moduleName}.canStartConnector: Entered in transaction loop while the charging station is unavailable`
       )
       return false
     }
@@ -167,7 +187,7 @@ export class AutomaticTransactionGenerator {
       logger.info(
         `${this.logPrefix(
           connectorId
-        )} entered in transaction loop while the connector ${connectorId.toString()} is unavailable`
+        )} ${moduleName}.canStartConnector: Entered in transaction loop while the connector ${connectorId.toString()} is unavailable`
       )
       return false
     }
@@ -175,7 +195,7 @@ export class AutomaticTransactionGenerator {
     if (connectorStatus?.transactionStarted === true) {
       logger.info(
         // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
-        `${this.logPrefix(connectorId)} entered in transaction loop while a transaction ${connectorStatus.transactionId?.toString()} is already started on connector ${connectorId.toString()}`
+        `${this.logPrefix(connectorId)} ${moduleName}.canStartConnector: Entered in transaction loop while a transaction ${connectorStatus.transactionId?.toString()} is already started on connector ${connectorId.toString()}`
       )
       return false
     }
@@ -185,20 +205,21 @@ export class AutomaticTransactionGenerator {
   private getConnectorStatus (connectorId: number): Status {
     const statusIndex = connectorId - 1
     if (statusIndex < 0) {
-      logger.error(`${this.logPrefix(connectorId)} invalid connector id`)
+      logger.error(
+        `${this.logPrefix(connectorId)} ${moduleName}.getConnectorStatus: Invalid connector id`
+      )
       throw new BaseError(`Invalid connector id ${connectorId.toString()}`)
     }
     let connectorStatus: Status | undefined
-    if (this.chargingStation.getAutomaticTransactionGeneratorStatuses()?.[statusIndex] != null) {
-      connectorStatus = clone<Status>(
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        this.chargingStation.getAutomaticTransactionGeneratorStatuses()![statusIndex]
-      )
+    const statusEntry =
+      this.chargingStation.getAutomaticTransactionGeneratorStatuses()?.[statusIndex]
+    if (statusEntry != null) {
+      connectorStatus = clone(statusEntry)
     } else {
       logger.warn(
         `${this.logPrefix(
           connectorId
-        )} no status found for connector #${connectorId.toString()} in charging station configuration file. New status will be created`
+        )} ${moduleName}.getConnectorStatus: No status found for connector #${connectorId.toString()} in charging station configuration file. New status will be created`
       )
     }
     if (connectorStatus != null) {
@@ -238,37 +259,25 @@ export class AutomaticTransactionGenerator {
     )
   }
 
-  private handleStartTransactionResponse (
-    connectorId: number,
-    startResponse: StartTransactionResponse
-  ): void {
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    ++this.connectorsStatus.get(connectorId)!.startTransactionRequests
-    if (startResponse.idTagInfo.status === AuthorizationStatus.ACCEPTED) {
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      ++this.connectorsStatus.get(connectorId)!.acceptedStartTransactionRequests
+  private handleStartTransactionResult (connectorId: number, result: StartTransactionResult): void {
+    const connectorStatus = this.connectorsStatus.get(connectorId)
+    if (connectorStatus == null) {
+      return
+    }
+    ++connectorStatus.startTransactionRequests
+    if (result.accepted) {
+      ++connectorStatus.acceptedStartTransactionRequests
     } else {
-      logger.warn(`${this.logPrefix(connectorId)} start transaction rejected`)
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      ++this.connectorsStatus.get(connectorId)!.rejectedStartTransactionRequests
+      logger.warn(
+        `${this.logPrefix(connectorId)} ${moduleName}.handleStartTransactionResult: Start transaction rejected`
+      )
+      ++connectorStatus.rejectedStartTransactionRequests
     }
   }
 
   private initializeConnectorsStatus (): void {
-    if (this.chargingStation.hasEvses) {
-      for (const [evseId, evseStatus] of this.chargingStation.evses) {
-        if (evseId > 0) {
-          for (const connectorId of evseStatus.connectors.keys()) {
-            this.connectorsStatus.set(connectorId, this.getConnectorStatus(connectorId))
-          }
-        }
-      }
-    } else {
-      for (const connectorId of this.chargingStation.connectors.keys()) {
-        if (connectorId > 0) {
-          this.connectorsStatus.set(connectorId, this.getConnectorStatus(connectorId))
-        }
-      }
+    for (const { connectorId } of this.chargingStation.iterateConnectors(true)) {
+      this.connectorsStatus.set(connectorId, this.getConnectorStatus(connectorId))
     }
   }
 
@@ -277,14 +286,15 @@ export class AutomaticTransactionGenerator {
     stopAbsoluteDuration?: boolean
   ): Promise<void> {
     this.setStartConnectorStatus(connectorId, stopAbsoluteDuration)
+    const connectorStatus = this.connectorsStatus.get(connectorId)
+    if (connectorStatus == null) {
+      return
+    }
     logger.info(
       `${this.logPrefix(
         connectorId
-      )} started on connector and will run for ${formatDurationMilliSeconds(
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        this.connectorsStatus.get(connectorId)!.stopDate!.getTime() -
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          this.connectorsStatus.get(connectorId)!.startDate!.getTime()
+      )} ${moduleName}.internalStartConnector: Started on connector and will run for ${formatDurationMilliSeconds(
+        (connectorStatus.stopDate?.getTime() ?? 0) - (connectorStatus.startDate?.getTime() ?? 0)
       )}`
     )
     while (this.connectorsStatus.get(connectorId)?.start === true) {
@@ -297,39 +307,38 @@ export class AutomaticTransactionGenerator {
       }
       const wait = secondsToMilliseconds(
         randomInt(
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          this.chargingStation.getAutomaticTransactionGeneratorConfiguration()!
-            .minDelayBetweenTwoTransactions,
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          this.chargingStation.getAutomaticTransactionGeneratorConfiguration()!
-            .maxDelayBetweenTwoTransactions + 1
+          this.chargingStation.getAutomaticTransactionGeneratorConfiguration()
+            ?.minDelayBetweenTwoTransactions ?? 0,
+          (this.chargingStation.getAutomaticTransactionGeneratorConfiguration()
+            ?.maxDelayBetweenTwoTransactions ?? 0) + 1
         )
       )
-      logger.info(`${this.logPrefix(connectorId)} waiting for ${formatDurationMilliSeconds(wait)}`)
+      logger.info(
+        `${this.logPrefix(connectorId)} ${moduleName}.internalStartConnector: Waiting for ${formatDurationMilliSeconds(wait)}`
+      )
       await sleep(wait)
       const start = secureRandom()
       if (
         start <
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        this.chargingStation.getAutomaticTransactionGeneratorConfiguration()!.probabilityOfStart
+        (this.chargingStation.getAutomaticTransactionGeneratorConfiguration()?.probabilityOfStart ??
+          0)
       ) {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        this.connectorsStatus.get(connectorId)!.skippedConsecutiveTransactions = 0
+        connectorStatus.skippedConsecutiveTransactions = 0
         // Start transaction
         const startResponse = await this.startTransaction(connectorId)
-        if (startResponse?.idTagInfo.status === AuthorizationStatus.ACCEPTED) {
+        if (startResponse?.accepted === true) {
           // Wait until end of transaction
           const waitTrxEnd = secondsToMilliseconds(
             randomInt(
-              // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-              this.chargingStation.getAutomaticTransactionGeneratorConfiguration()!.minDuration,
-              // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-              this.chargingStation.getAutomaticTransactionGeneratorConfiguration()!.maxDuration + 1
+              this.chargingStation.getAutomaticTransactionGeneratorConfiguration()?.minDuration ??
+                0,
+              (this.chargingStation.getAutomaticTransactionGeneratorConfiguration()?.maxDuration ??
+                0) + 1
             )
           )
           logger.info(
             // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
-            `${this.logPrefix(connectorId)} transaction started with id ${this.chargingStation
+            `${this.logPrefix(connectorId)} ${moduleName}.internalStartConnector: Transaction started with id ${this.chargingStation
               .getConnectorStatus(connectorId)
               ?.transactionId?.toString()} and will stop in ${formatDurationMilliSeconds(waitTrxEnd)}`
           )
@@ -337,37 +346,25 @@ export class AutomaticTransactionGenerator {
           await this.stopTransaction(connectorId)
         }
       } else {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        ++this.connectorsStatus.get(connectorId)!.skippedConsecutiveTransactions
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        ++this.connectorsStatus.get(connectorId)!.skippedTransactions
+        ++connectorStatus.skippedConsecutiveTransactions
+        ++connectorStatus.skippedTransactions
         logger.info(
-          // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
-          `${this.logPrefix(connectorId)} skipped consecutively ${this.connectorsStatus
-            .get(connectorId)
-            ?.skippedConsecutiveTransactions.toString()
-          // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
-          }/${this.connectorsStatus.get(connectorId)?.skippedTransactions.toString()} transaction(s)`
+          `${this.logPrefix(connectorId)} ${moduleName}.internalStartConnector: Skipped consecutively ${connectorStatus.skippedConsecutiveTransactions.toString()}/${connectorStatus.skippedTransactions.toString()} transaction(s)`
         )
       }
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      this.connectorsStatus.get(connectorId)!.lastRunDate = new Date()
+      connectorStatus.lastRunDate = new Date()
     }
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    this.connectorsStatus.get(connectorId)!.stoppedDate = new Date()
+    connectorStatus.stoppedDate = new Date()
     logger.info(
       `${this.logPrefix(
         connectorId
-      )} stopped on connector and lasted for ${formatDurationMilliSeconds(
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        this.connectorsStatus.get(connectorId)!.stoppedDate!.getTime() -
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          this.connectorsStatus.get(connectorId)!.startDate!.getTime()
+      )} ${moduleName}.internalStartConnector: Stopped on connector and lasted for ${formatDurationMilliSeconds(
+        connectorStatus.stoppedDate.getTime() - (connectorStatus.startDate?.getTime() ?? 0)
       )}`
     )
     logger.debug(
-      `${this.logPrefix(connectorId)} stopped with connector status: %j`,
-      this.connectorsStatus.get(connectorId)
+      `${this.logPrefix(connectorId)} ${moduleName}.internalStartConnector: Stopped with connector status: %j`,
+      connectorStatus
     )
     this.chargingStation.emitChargingStationEvent(ChargingStationEvents.updated)
   }
@@ -386,173 +383,129 @@ export class AutomaticTransactionGenerator {
     stopAbsoluteDuration = this.chargingStation.getAutomaticTransactionGeneratorConfiguration()
       ?.stopAbsoluteDuration
   ): void {
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    this.connectorsStatus.get(connectorId)!.startDate = new Date()
-    if (
-      stopAbsoluteDuration === false ||
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      !isValidDate(this.connectorsStatus.get(connectorId)!.stopDate)
-    ) {
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      this.connectorsStatus.get(connectorId)!.stopDate = new Date(
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        this.connectorsStatus.get(connectorId)!.startDate!.getTime() +
+    const connectorStatus = this.connectorsStatus.get(connectorId)
+    if (connectorStatus == null) {
+      return
+    }
+    connectorStatus.startDate = new Date()
+    if (stopAbsoluteDuration === false || !isValidDate(connectorStatus.stopDate)) {
+      connectorStatus.stopDate = new Date(
+        connectorStatus.startDate.getTime() +
           hoursToMilliseconds(
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            this.chargingStation.getAutomaticTransactionGeneratorConfiguration()!.stopAfterHours
+            this.chargingStation.getAutomaticTransactionGeneratorConfiguration()?.stopAfterHours ??
+              0
           )
       )
     }
-    delete this.connectorsStatus.get(connectorId)?.stoppedDate
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    this.connectorsStatus.get(connectorId)!.skippedConsecutiveTransactions = 0
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    this.connectorsStatus.get(connectorId)!.start = true
+    delete connectorStatus.stoppedDate
+    connectorStatus.skippedConsecutiveTransactions = 0
+    connectorStatus.start = true
     this.chargingStation.emitChargingStationEvent(ChargingStationEvents.updated)
   }
 
   private startConnectors (stopAbsoluteDuration?: boolean): void {
     if (
-      this.connectorsStatus.size > 0 &&
+      !isEmpty(this.connectorsStatus) &&
       this.connectorsStatus.size !== this.chargingStation.getNumberOfConnectors()
     ) {
       this.connectorsStatus.clear()
       this.initializeConnectorsStatus()
     }
-    if (this.chargingStation.hasEvses) {
-      for (const [evseId, evseStatus] of this.chargingStation.evses) {
-        if (evseId > 0) {
-          for (const connectorId of evseStatus.connectors.keys()) {
-            this.startConnector(connectorId, stopAbsoluteDuration)
-          }
-        }
-      }
-    } else {
-      for (const connectorId of this.chargingStation.connectors.keys()) {
-        if (connectorId > 0) {
-          this.startConnector(connectorId, stopAbsoluteDuration)
-        }
-      }
+    for (const { connectorId } of this.chargingStation.iterateConnectors(true)) {
+      this.startConnector(connectorId, stopAbsoluteDuration)
     }
   }
 
-  private async startTransaction (
-    connectorId: number
-  ): Promise<StartTransactionResponse | undefined> {
+  private async startTransaction (connectorId: number): Promise<StartTransactionResult | undefined> {
     const measureId = 'StartTransaction with ATG'
     const beginId = PerformanceStatistics.beginMeasure(measureId)
-    let startResponse: StartTransactionResponse | undefined
+    let result: StartTransactionResult | undefined
     if (this.chargingStation.hasIdTags()) {
       const idTag = IdTagsCache.getInstance().getIdTag(
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        this.chargingStation.getAutomaticTransactionGeneratorConfiguration()!.idTagDistribution!,
+        this.chargingStation.getAutomaticTransactionGeneratorConfiguration()?.idTagDistribution ??
+          IdTagDistribution.ROUND_ROBIN,
         this.chargingStation,
         connectorId
       )
       const startTransactionLogMsg = `${this.logPrefix(
         connectorId
-      )} start transaction with an idTag '${idTag}'`
+      )} ${moduleName}.startTransaction: Start transaction with an idTag '${idTag}'`
       if (this.getRequireAuthorize()) {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        ++this.connectorsStatus.get(connectorId)!.authorizeRequests
-        if (await isIdTagAuthorized(this.chargingStation, connectorId, idTag)) {
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          ++this.connectorsStatus.get(connectorId)!.acceptedAuthorizeRequests
-          logger.info(startTransactionLogMsg)
-          // Start transaction
-          startResponse = await this.chargingStation.ocppRequestService.requestHandler<
-            Partial<StartTransactionRequest>,
-            StartTransactionResponse
-          >(this.chargingStation, RequestCommand.START_TRANSACTION, {
-            connectorId,
-            idTag,
-          })
-          this.handleStartTransactionResponse(connectorId, startResponse)
-          PerformanceStatistics.endMeasure(measureId, beginId)
-          return startResponse
+        const connectorStatus = this.connectorsStatus.get(connectorId)
+        if (connectorStatus != null) {
+          ++connectorStatus.authorizeRequests
         }
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        ++this.connectorsStatus.get(connectorId)!.rejectedAuthorizeRequests
+        if (await isIdTagAuthorized(this.chargingStation, connectorId, idTag)) {
+          if (connectorStatus != null) {
+            ++connectorStatus.acceptedAuthorizeRequests
+          }
+          logger.info(startTransactionLogMsg)
+          result = await startTransactionOnConnector(this.chargingStation, connectorId, idTag)
+          this.handleStartTransactionResult(connectorId, result)
+          PerformanceStatistics.endMeasure(measureId, beginId)
+          return result
+        }
+        if (connectorStatus != null) {
+          ++connectorStatus.rejectedAuthorizeRequests
+        }
         PerformanceStatistics.endMeasure(measureId, beginId)
-        return startResponse
+        return result
       }
       logger.info(startTransactionLogMsg)
-      // Start transaction
-      startResponse = await this.chargingStation.ocppRequestService.requestHandler<
-        Partial<StartTransactionRequest>,
-        StartTransactionResponse
-      >(this.chargingStation, RequestCommand.START_TRANSACTION, {
-        connectorId,
-        idTag,
-      })
-      this.handleStartTransactionResponse(connectorId, startResponse)
+      result = await startTransactionOnConnector(this.chargingStation, connectorId, idTag)
+      this.handleStartTransactionResult(connectorId, result)
       PerformanceStatistics.endMeasure(measureId, beginId)
-      return startResponse
+      return result
     }
-    logger.info(`${this.logPrefix(connectorId)} start transaction without an idTag`)
-    startResponse = await this.chargingStation.ocppRequestService.requestHandler<
-      Partial<StartTransactionRequest>,
-      StartTransactionResponse
-    >(this.chargingStation, RequestCommand.START_TRANSACTION, {
-      connectorId,
-    })
-    this.handleStartTransactionResponse(connectorId, startResponse)
+    logger.info(
+      `${this.logPrefix(connectorId)} ${moduleName}.startTransaction: Start transaction without an idTag`
+    )
+    result = await startTransactionOnConnector(this.chargingStation, connectorId)
+    this.handleStartTransactionResult(connectorId, result)
     PerformanceStatistics.endMeasure(measureId, beginId)
-    return startResponse
+    return result
   }
 
   private stopConnectors (): void {
-    if (this.chargingStation.hasEvses) {
-      for (const [evseId, evseStatus] of this.chargingStation.evses) {
-        if (evseId > 0) {
-          for (const connectorId of evseStatus.connectors.keys()) {
-            this.stopConnector(connectorId)
-          }
-        }
-      }
-    } else {
-      for (const connectorId of this.chargingStation.connectors.keys()) {
-        if (connectorId > 0) {
-          this.stopConnector(connectorId)
-        }
-      }
+    for (const { connectorId } of this.chargingStation.iterateConnectors(true)) {
+      this.stopConnector(connectorId)
     }
   }
 
   private async stopTransaction (
     connectorId: number,
     reason = StopTransactionReason.LOCAL
-  ): Promise<StopTransactionResponse | undefined> {
+  ): Promise<StopTransactionResult | undefined> {
     const measureId = 'StopTransaction with ATG'
     const beginId = PerformanceStatistics.beginMeasure(measureId)
-    let stopResponse: StopTransactionResponse | undefined
+    let result: StopTransactionResult | undefined
     if (this.chargingStation.getConnectorStatus(connectorId)?.transactionStarted === true) {
       logger.info(
         // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
-        `${this.logPrefix(connectorId)} stop transaction with id ${this.chargingStation
+        `${this.logPrefix(connectorId)} ${moduleName}.stopTransaction: Stop transaction with id ${this.chargingStation
           .getConnectorStatus(connectorId)
           ?.transactionId?.toString()}`
       )
-      stopResponse = await this.chargingStation.stopTransactionOnConnector(connectorId, reason)
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      ++this.connectorsStatus.get(connectorId)!.stopTransactionRequests
-      if (stopResponse.idTagInfo?.status === AuthorizationStatus.ACCEPTED) {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        ++this.connectorsStatus.get(connectorId)!.acceptedStopTransactionRequests
-      } else {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        ++this.connectorsStatus.get(connectorId)!.rejectedStopTransactionRequests
+      result = await stopTransactionOnConnector(this.chargingStation, connectorId, reason)
+      const connectorStatus = this.connectorsStatus.get(connectorId)
+      if (connectorStatus != null) {
+        ++connectorStatus.stopTransactionRequests
+        if (result.accepted) {
+          ++connectorStatus.acceptedStopTransactionRequests
+        } else {
+          ++connectorStatus.rejectedStopTransactionRequests
+        }
       }
     } else {
       const transactionId = this.chargingStation.getConnectorStatus(connectorId)?.transactionId
       logger.debug(
-        `${this.logPrefix(connectorId)} stopping a not started transaction${
+        `${this.logPrefix(connectorId)} ${moduleName}.stopTransaction: Stopping a not started transaction${
           transactionId != null ? ` with id ${transactionId.toString()}` : ''
         }`
       )
     }
     PerformanceStatistics.endMeasure(measureId, beginId)
-    return stopResponse
+    return result
   }
 
   private async waitChargingStationAvailable (connectorId: number): Promise<void> {
@@ -562,11 +515,11 @@ export class AutomaticTransactionGenerator {
         logger.info(
           `${this.logPrefix(
             connectorId
-          )} transaction loop waiting for charging station to be available`
+          )} ${moduleName}.waitChargingStationAvailable: Transaction loop waiting for charging station to be available`
         )
         logged = true
       }
-      await sleep(Constants.DEFAULT_ATG_WAIT_TIME)
+      await sleep(Constants.DEFAULT_ATG_WAIT_TIME_MS)
     }
   }
 
@@ -577,11 +530,11 @@ export class AutomaticTransactionGenerator {
         logger.info(
           `${this.logPrefix(
             connectorId
-          )} transaction loop waiting for connector ${connectorId.toString()} to be available`
+          )} ${moduleName}.waitConnectorAvailable: Transaction loop waiting for connector ${connectorId.toString()} to be available`
         )
         logged = true
       }
-      await sleep(Constants.DEFAULT_ATG_WAIT_TIME)
+      await sleep(Constants.DEFAULT_ATG_WAIT_TIME_MS)
     }
   }
 
@@ -592,11 +545,11 @@ export class AutomaticTransactionGenerator {
       if (!logged) {
         logger.info(
           // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
-          `${this.logPrefix(connectorId)} transaction loop waiting for started transaction ${connectorStatus.transactionId?.toString()} on connector ${connectorId.toString()} to be stopped`
+          `${this.logPrefix(connectorId)} ${moduleName}.waitRunningTransactionStopped: Transaction loop waiting for started transaction ${connectorStatus.transactionId?.toString()} on connector ${connectorId.toString()} to be stopped`
         )
         logged = true
       }
-      await sleep(Constants.DEFAULT_ATG_WAIT_TIME)
+      await sleep(Constants.DEFAULT_ATG_WAIT_TIME_MS)
     }
   }
 }

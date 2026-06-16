@@ -4,6 +4,7 @@ import type { BroadcastChannelResponsePayload } from './WorkerBroadcastChannel.j
 
 export enum ApplicationProtocol {
   HTTP = 'http',
+  MCP = 'mcp',
   WS = 'ws',
 }
 
@@ -26,6 +27,7 @@ export enum ProcedureName {
   HEARTBEAT = 'heartbeat',
   LIST_CHARGING_STATIONS = 'listChargingStations',
   LIST_TEMPLATES = 'listTemplates',
+  LOCK_CONNECTOR = 'lockConnector',
   LOG_STATUS_NOTIFICATION = 'logStatusNotification',
   METER_VALUES = 'meterValues',
   NOTIFY_CUSTOMER_INFORMATION = 'notifyCustomerInformation',
@@ -39,13 +41,17 @@ export enum ProcedureName {
   START_AUTOMATIC_TRANSACTION_GENERATOR = 'startAutomaticTransactionGenerator',
   START_CHARGING_STATION = 'startChargingStation',
   START_SIMULATOR = 'startSimulator',
+  /** OCPP 1.6 only. Use TRANSACTION_EVENT for OCPP 2.0.x. */
   START_TRANSACTION = 'startTransaction',
   STATUS_NOTIFICATION = 'statusNotification',
   STOP_AUTOMATIC_TRANSACTION_GENERATOR = 'stopAutomaticTransactionGenerator',
   STOP_CHARGING_STATION = 'stopChargingStation',
   STOP_SIMULATOR = 'stopSimulator',
+  /** OCPP 1.6 only. Use TRANSACTION_EVENT for OCPP 2.0.x. */
   STOP_TRANSACTION = 'stopTransaction',
+  /** OCPP 2.0.x only. Use START_TRANSACTION / STOP_TRANSACTION for OCPP 1.6. */
   TRANSACTION_EVENT = 'transactionEvent',
+  UNLOCK_CONNECTOR = 'unlockConnector',
 }
 
 export enum Protocol {
@@ -60,6 +66,12 @@ export enum ResponseStatus {
   FAILURE = 'failure',
   SUCCESS = 'success',
 }
+
+export enum ServerNotification {
+  REFRESH = 'refresh',
+}
+
+export type ProtocolNotification = [ServerNotification]
 
 export type ProtocolRequest = [UUIDv4, ProcedureName, RequestPayload]
 

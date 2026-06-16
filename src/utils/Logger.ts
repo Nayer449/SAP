@@ -11,7 +11,7 @@ import DailyRotateFile from 'winston-daily-rotate-file'
 
 import { ConfigurationSection, type LogConfiguration } from '../types/index.js'
 import { Configuration } from './Configuration.js'
-import { insertAt, isNotEmptyString } from './Utils.js'
+import { insertAt, isEmpty, isNotEmptyString } from './Utils.js'
 
 let loggerInstance: undefined | WinstonLogger
 
@@ -72,13 +72,15 @@ const getLoggerInstance = (): WinstonLogger => {
   }
   const logFormat = format.combine(
     format.splat(),
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    (format[logConfiguration.format! as keyof FormatWrap] as FormatWrap)()
+    (format[(logConfiguration.format ?? 'simple') as keyof FormatWrap] as FormatWrap)()
   )
   loggerInstance = createLogger({
     format: logFormat,
     level: logConfiguration.level,
-    silent: logConfiguration.enabled === false || logTransports.length === 0,
+    silent:
+      logConfiguration.enabled === false ||
+      isEmpty(logTransports) ||
+      process.env.NODE_ENV === 'test',
     transports: logTransports,
   })
   //

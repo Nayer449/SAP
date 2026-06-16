@@ -1,4 +1,5 @@
 {
+  "$schemaVersion": 1,
   "supervisionUrls": ["ws://localhost:8010/OCPP16/5be7fb271014d90008992f06"],
   "supervisionUrlDistribution": "round-robin",
   "log": {
@@ -17,6 +18,13 @@
   "uiServer": {
     "enabled": false,
     "type": "ws",
+    "accessPolicy": {
+      "requireTlsForNonLoopback": true,
+      "trustedProxies": [],
+      "allowLoopbackProxy": false,
+      "allowedHosts": [],
+      "allowedOrigins": []
+    },
     "authentication": {
       "enabled": true,
       "type": "protocol-basic-auth",
@@ -24,6 +32,7 @@
       "password": "admin"
     }
   },
+  "persistState": true,
   "stationTemplateUrls": [
     {
       "file": "siemens.station-template.json",

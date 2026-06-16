@@ -2,9 +2,7 @@ import {
   type AutomaticTransactionGeneratorConfiguration,
   type ChargingStationInfo,
   CurrentType,
-  type IncomingRequestCommand,
   OCPPVersion,
-  type RequestCommand,
   VendorParametersKey,
 } from '../types/index.js'
 
@@ -22,31 +20,42 @@ export class Constants {
       stopAfterHours: 0.25,
     })
 
-  static readonly DEFAULT_ATG_WAIT_TIME = 1000 // Ms
+  static readonly DEFAULT_ATG_WAIT_TIME_MS = 1000
 
-  static readonly DEFAULT_BOOT_NOTIFICATION_INTERVAL = 60000 // Ms
+  static readonly DEFAULT_AUTH_CACHE_CLEANUP_INTERVAL_SECONDS = 300
+
+  static readonly DEFAULT_AUTH_CACHE_MAX_ENTRIES = 1000
+
+  static readonly DEFAULT_AUTH_CACHE_RATE_LIMIT_MAX_REQUESTS = 10
+
+  static readonly DEFAULT_AUTH_CACHE_RATE_LIMIT_WINDOW_MS = 60000
+
+  static readonly DEFAULT_AUTH_CACHE_TTL_SECONDS = 3600
+
+  static readonly DEFAULT_BOOT_NOTIFICATION_INTERVAL_MS = 60000
 
   static readonly DEFAULT_CIRCULAR_BUFFER_CAPACITY = 386
-  static readonly DEFAULT_CONNECTION_TIMEOUT = 30 // Seconds
-  static readonly DEFAULT_EV_CONNECTION_TIMEOUT = 180 // Seconds
+
+  static readonly DEFAULT_EV_CONNECTION_TIMEOUT_SECONDS = 180
 
   static readonly DEFAULT_FLUCTUATION_PERCENT = 5
+
   static readonly DEFAULT_HASH_ALGORITHM = 'sha384'
 
-  static readonly DEFAULT_HEARTBEAT_INTERVAL = 60000 // Ms
+  static readonly DEFAULT_HEARTBEAT_INTERVAL_MS = 60000
 
-  static readonly DEFAULT_IDTAG = '00000000'
+  static readonly DEFAULT_LOG_STATISTICS_INTERVAL_SECONDS = 60
 
-  static readonly DEFAULT_LOG_STATISTICS_INTERVAL = 60 // Seconds
+  static readonly DEFAULT_MESSAGE_BUFFER_FLUSH_INTERVAL_MS = 60000
 
-  static readonly DEFAULT_MESSAGE_BUFFER_FLUSH_INTERVAL = 60000 // Ms
+  static readonly DEFAULT_MESSAGE_TIMEOUT_SECONDS = 30
 
-  static readonly DEFAULT_METER_VALUES_INTERVAL = 60000 // Ms
+  static readonly DEFAULT_METER_VALUES_INTERVAL_MS = 60000
 
   static readonly DEFAULT_PERFORMANCE_DIRECTORY = 'performance'
+
   static readonly DEFAULT_PERFORMANCE_RECORDS_DB_NAME = 'e-mobility-charging-stations-simulator'
   static readonly DEFAULT_PERFORMANCE_RECORDS_FILENAME = 'performanceRecords.json'
-
   static readonly DEFAULT_STATION_INFO: Readonly<Partial<ChargingStationInfo>> = Object.freeze({
     automaticTransactionGeneratorPersistentConfiguration: true,
     autoReconnectMaxRetries: -1,
@@ -71,10 +80,11 @@ export class Constants {
     ocppVersion: OCPPVersion.VERSION_16,
     outOfOrderEndMeterValues: false,
     phaseLineToLineVoltageMeterValues: false,
+    postTransactionDelay: 0,
     reconnectExponentialDelay: false,
     registrationMaxRetries: -1,
     remoteAuthorization: true,
-    resetTime: 30000, // Ms
+    resetTime: 30000,
     stationInfoPersistentConfiguration: true,
     stopTransactionsOnStopped: true,
     supervisionUrlOcppConfiguration: false,
@@ -83,12 +93,15 @@ export class Constants {
     useConnectorId0: true,
   })
 
-  static readonly DEFAULT_TX_UPDATED_INTERVAL = 30 // Seconds
+  static readonly DEFAULT_TX_UPDATED_INTERVAL_SECONDS = 30
 
   static readonly DEFAULT_UI_SERVER_HOST = 'localhost'
   static readonly DEFAULT_UI_SERVER_PORT = 8080
 
-  static readonly DEFAULT_WEBSOCKET_PING_INTERVAL = 30 // Seconds
+  static readonly DEFAULT_WS_HANDSHAKE_TIMEOUT_SECONDS = 30
+  static readonly DEFAULT_WS_PING_INTERVAL_SECONDS = 30
+  static readonly DEFAULT_WS_RECONNECT_DELAY_SECONDS = 30
+  static readonly DEFAULT_WS_RECONNECT_TIMEOUT_OFFSET_MS = 1000
 
   static readonly EMPTY_FROZEN_OBJECT = Object.freeze({})
 
@@ -96,23 +109,17 @@ export class Constants {
     /* This is intentional */
   })
 
+  static readonly ENV_SIMULATOR_COLD_START = 'SIMULATOR_COLD_START'
+
   static readonly MAX_RANDOM_INTEGER = 281474976710655 // 2^48 - 1 (randomInit() limit)
 
   // Node.js setInterval/setTimeout maximum safe delay value (2^31-1 ms ≈ 24.8 days)
   // Values exceeding this limit cause Node.js to reset the delay to 1ms
-  static readonly MAX_SETINTERVAL_DELAY = 2147483647 // Ms
-
-  static readonly OCPP_VALUE_ABSOLUTE_MAX_LENGTH = 2500
+  static readonly MAX_SETINTERVAL_DELAY_MS = 2147483647
 
   static readonly PERFORMANCE_RECORDS_TABLE = 'performance_records'
 
-  static readonly STOP_CHARGING_STATIONS_TIMEOUT = 60000 // Ms
+  static readonly STOP_CHARGING_STATIONS_TIMEOUT_MS = 60000
 
-  static readonly UNKNOWN_OCPP_COMMAND = 'unknown OCPP command' as
-    | IncomingRequestCommand
-    | RequestCommand
-
-  private constructor () {
-    // This is intentional
-  }
+  static readonly STOP_MESSAGE_SEQUENCE_TIMEOUT_MS = 30000
 }

@@ -28,6 +28,7 @@ import {
   extractTimeSeriesValues,
   formatDurationSeconds,
   generateUUID,
+  getErrorMessage,
   JSONStringify,
   logger,
   logPrefix,
@@ -37,6 +38,8 @@ import {
   percentile,
   std,
 } from '../utils/index.js'
+
+const moduleName = 'PerformanceStatistics'
 
 export class PerformanceStatistics {
   private static readonly instances: Map<string, PerformanceStatistics> = new Map<
@@ -71,9 +74,9 @@ export class PerformanceStatistics {
 
   public static deleteInstance (objId: string | undefined): boolean {
     if (objId == null) {
-      const errMsg = 'Cannot delete performance statistics instance without specifying object id'
-      logger.error(`${PerformanceStatistics.logPrefix()} ${errMsg}`)
-      throw new BaseError(errMsg)
+      const errorMsg = 'Cannot delete performance statistics instance without specifying object id'
+      logger.error(`${PerformanceStatistics.logPrefix()} ${moduleName}.deleteInstance: ${errorMsg}`)
+      throw new BaseError(errorMsg)
     }
     return PerformanceStatistics.instances.delete(objId)
   }
@@ -82,7 +85,7 @@ export class PerformanceStatistics {
     try {
       performance.measure(name, markId)
     } catch (error) {
-      if (error instanceof Error && error.message.includes('performance mark has not been set')) {
+      if (getErrorMessage(error).includes('performance mark has not been set')) {
         /* Ignore */
       } else {
         throw error
@@ -98,19 +101,19 @@ export class PerformanceStatistics {
     uri: undefined | URL
   ): PerformanceStatistics | undefined {
     if (objId == null) {
-      const errMsg = 'Cannot get performance statistics instance without specifying object id'
-      logger.error(`${PerformanceStatistics.logPrefix()} ${errMsg}`)
-      throw new BaseError(errMsg)
+      const errorMsg = 'Cannot get performance statistics instance without specifying object id'
+      logger.error(`${PerformanceStatistics.logPrefix()} ${moduleName}.getInstance: ${errorMsg}`)
+      throw new BaseError(errorMsg)
     }
     if (objName == null) {
-      const errMsg = 'Cannot get performance statistics instance without specifying object name'
-      logger.error(`${PerformanceStatistics.logPrefix()} ${errMsg}`)
-      throw new BaseError(errMsg)
+      const errorMsg = 'Cannot get performance statistics instance without specifying object name'
+      logger.error(`${PerformanceStatistics.logPrefix()} ${moduleName}.getInstance: ${errorMsg}`)
+      throw new BaseError(errorMsg)
     }
     if (uri == null) {
-      const errMsg = 'Cannot get performance statistics instance without specifying object uri'
-      logger.error(`${PerformanceStatistics.logPrefix()} ${errMsg}`)
-      throw new BaseError(errMsg)
+      const errorMsg = 'Cannot get performance statistics instance without specifying object uri'
+      logger.error(`${PerformanceStatistics.logPrefix()} ${moduleName}.getInstance: ${errorMsg}`)
+      throw new BaseError(errorMsg)
     }
     if (!PerformanceStatistics.instances.has(objId)) {
       PerformanceStatistics.instances.set(objId, new PerformanceStatistics(objId, objName, uri))
@@ -127,51 +130,47 @@ export class PerformanceStatistics {
     messageType: MessageType
   ): void {
     switch (messageType) {
-      case MessageType.CALL_ERROR_MESSAGE:
-        if (
-          this.statistics.statisticsData.has(command) &&
-          this.statistics.statisticsData.get(command)?.errorCount != null
-        ) {
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          ++this.statistics.statisticsData.get(command)!.errorCount!
+      case MessageType.CALL_ERROR_MESSAGE: {
+        const commandStatisticsData = this.statistics.statisticsData.get(command)
+        if (commandStatisticsData?.errorCount != null) {
+          ++commandStatisticsData.errorCount
         } else {
           this.statistics.statisticsData.set(command, {
-            ...this.statistics.statisticsData.get(command),
+            ...commandStatisticsData,
             errorCount: 1,
           })
         }
         break
-      case MessageType.CALL_MESSAGE:
-        if (
-          this.statistics.statisticsData.has(command) &&
-          this.statistics.statisticsData.get(command)?.requestCount != null
-        ) {
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          ++this.statistics.statisticsData.get(command)!.requestCount!
+      }
+      case MessageType.CALL_MESSAGE: {
+        const commandStatisticsData = this.statistics.statisticsData.get(command)
+        if (commandStatisticsData?.requestCount != null) {
+          ++commandStatisticsData.requestCount
         } else {
           this.statistics.statisticsData.set(command, {
-            ...this.statistics.statisticsData.get(command),
+            ...commandStatisticsData,
             requestCount: 1,
           })
         }
         break
-      case MessageType.CALL_RESULT_MESSAGE:
-        if (
-          this.statistics.statisticsData.has(command) &&
-          this.statistics.statisticsData.get(command)?.responseCount != null
-        ) {
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          ++this.statistics.statisticsData.get(command)!.responseCount!
+      }
+      case MessageType.CALL_RESULT_MESSAGE: {
+        const commandStatisticsData = this.statistics.statisticsData.get(command)
+        if (commandStatisticsData?.responseCount != null) {
+          ++commandStatisticsData.responseCount
         } else {
           this.statistics.statisticsData.set(command, {
-            ...this.statistics.statisticsData.get(command),
+            ...commandStatisticsData,
             responseCount: 1,
           })
         }
         break
+      }
       default:
-        // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
-        logger.error(`${this.logPrefix()} wrong message type ${messageType}`)
+        logger.error(
+          // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+          `${this.logPrefix()} ${moduleName}.addRequestStatistic: Wrong message type ${messageType}`
+        )
         break
     }
   }
@@ -189,7 +188,7 @@ export class PerformanceStatistics {
       )
     if (performanceStorageConfiguration.enabled === true) {
       logger.info(
-        `${this.logPrefix()} storage enabled: type ${
+        `${this.logPrefix()} ${moduleName}.start: Storage enabled: type ${
           // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
           performanceStorageConfiguration.type
           // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
@@ -210,62 +209,45 @@ export class PerformanceStatistics {
     if (!this.statistics.statisticsData.has(entry.name)) {
       this.statistics.statisticsData.set(entry.name, {})
     }
-    // Update current statistics
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    this.statistics.statisticsData.get(entry.name)!.timeMeasurementCount =
-      (this.statistics.statisticsData.get(entry.name)?.timeMeasurementCount ?? 0) + 1
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    this.statistics.statisticsData.get(entry.name)!.currentTimeMeasurement = entry.duration
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    this.statistics.statisticsData.get(entry.name)!.minTimeMeasurement = min(
-      entry.duration,
-      this.statistics.statisticsData.get(entry.name)?.minTimeMeasurement ?? Number.POSITIVE_INFINITY
-    )
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    this.statistics.statisticsData.get(entry.name)!.maxTimeMeasurement = max(
-      entry.duration,
-      this.statistics.statisticsData.get(entry.name)?.maxTimeMeasurement ?? Number.NEGATIVE_INFINITY
-    )
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    this.statistics.statisticsData.get(entry.name)!.totalTimeMeasurement =
-      (this.statistics.statisticsData.get(entry.name)?.totalTimeMeasurement ?? 0) + entry.duration
-    if (
-      !(
-        this.statistics.statisticsData.get(entry.name)?.measurementTimeSeries instanceof
-        CircularBuffer
+    const entryStatisticsData = this.statistics.statisticsData.get(entry.name)
+    if (entryStatisticsData != null) {
+      // Update current statistics
+      entryStatisticsData.timeMeasurementCount = (entryStatisticsData.timeMeasurementCount ?? 0) + 1
+      entryStatisticsData.currentTimeMeasurement = entry.duration
+      entryStatisticsData.minTimeMeasurement = min(
+        entry.duration,
+        entryStatisticsData.minTimeMeasurement ?? Number.POSITIVE_INFINITY
       )
-    ) {
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      this.statistics.statisticsData.get(entry.name)!.measurementTimeSeries =
-        new CircularBuffer<TimestampedData>(
+      entryStatisticsData.maxTimeMeasurement = max(
+        entry.duration,
+        entryStatisticsData.maxTimeMeasurement ?? Number.NEGATIVE_INFINITY
+      )
+      entryStatisticsData.totalTimeMeasurement =
+        (entryStatisticsData.totalTimeMeasurement ?? 0) + entry.duration
+      if (!(entryStatisticsData.measurementTimeSeries instanceof CircularBuffer)) {
+        entryStatisticsData.measurementTimeSeries = new CircularBuffer<TimestampedData>(
           Array<TimestampedData>,
           Constants.DEFAULT_CIRCULAR_BUFFER_CAPACITY
         )
+      }
+      entryStatisticsData.measurementTimeSeries.push({
+        timestamp: entry.startTime,
+        value: entry.duration,
+      })
+      const timeMeasurementValues = extractTimeSeriesValues(
+        entryStatisticsData.measurementTimeSeries
+      )
+      entryStatisticsData.avgTimeMeasurement = average(timeMeasurementValues)
+      entryStatisticsData.medTimeMeasurement = median(timeMeasurementValues)
+      entryStatisticsData.ninetyFiveThPercentileTimeMeasurement = percentile(
+        timeMeasurementValues,
+        95
+      )
+      entryStatisticsData.stdTimeMeasurement = std(
+        timeMeasurementValues,
+        entryStatisticsData.avgTimeMeasurement
+      )
     }
-    this.statistics.statisticsData.get(entry.name)?.measurementTimeSeries?.push({
-      timestamp: entry.startTime,
-      value: entry.duration,
-    })
-    const timeMeasurementValues = extractTimeSeriesValues(
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      this.statistics.statisticsData.get(entry.name)!
-        .measurementTimeSeries as CircularBuffer<TimestampedData>
-    )
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    this.statistics.statisticsData.get(entry.name)!.avgTimeMeasurement =
-      average(timeMeasurementValues)
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    this.statistics.statisticsData.get(entry.name)!.medTimeMeasurement =
-      median(timeMeasurementValues)
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    this.statistics.statisticsData.get(entry.name)!.ninetyFiveThPercentileTimeMeasurement =
-      percentile(timeMeasurementValues, 95)
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    this.statistics.statisticsData.get(entry.name)!.stdTimeMeasurement = std(
-      timeMeasurementValues,
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      this.statistics.statisticsData.get(entry.name)!.avgTimeMeasurement
-    )
     this.statistics.updatedAt = new Date()
     if (
       Configuration.getConfigurationSection<StorageConfiguration>(
@@ -294,7 +276,7 @@ export class PerformanceStatistics {
   }
 
   private logStatistics (): void {
-    logger.info(this.logPrefix(), {
+    logger.info(`${this.logPrefix()} ${moduleName}.logStatistics:`, {
       ...this.statistics,
       statisticsData: JSON.parse(
         JSONStringify(this.statistics.statisticsData, undefined, MapStringifyFormat.object)
@@ -307,24 +289,21 @@ export class PerformanceStatistics {
       ConfigurationSection.log
     )
     const logStatisticsInterval =
-      logConfiguration.enabled === true
-        ? // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        logConfiguration.statisticsInterval!
-        : 0
+      logConfiguration.enabled === true ? (logConfiguration.statisticsInterval ?? 0) : 0
     if (logStatisticsInterval > 0 && this.displayInterval == null) {
       this.displayInterval = setInterval(() => {
         this.logStatistics()
       }, secondsToMilliseconds(logStatisticsInterval))
       logger.info(
-        `${this.logPrefix()} logged every ${formatDurationSeconds(logStatisticsInterval)}`
+        `${this.logPrefix()} ${moduleName}.startLogStatisticsInterval: Logged every ${formatDurationSeconds(logStatisticsInterval)}`
       )
     } else if (this.displayInterval != null) {
       logger.info(
-        `${this.logPrefix()} already logged every ${formatDurationSeconds(logStatisticsInterval)}`
+        `${this.logPrefix()} ${moduleName}.startLogStatisticsInterval: Already logged every ${formatDurationSeconds(logStatisticsInterval)}`
       )
     } else if (logConfiguration.enabled === true) {
       logger.info(
-        `${this.logPrefix()} log interval is set to ${logStatisticsInterval.toString()}. Not logging statistics`
+        `${this.logPrefix()} ${moduleName}.startLogStatisticsInterval: Log interval is set to ${logStatisticsInterval.toString()}. Not logging statistics`
       )
     }
   }

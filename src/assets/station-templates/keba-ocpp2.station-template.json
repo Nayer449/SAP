@@ -1,4 +1,5 @@
 {
+  "$schemaVersion": 1,
   "supervisionUrls": ["ws://localhost:9000"],
   "supervisionUrlOcppConfiguration": true,
   "supervisionUrlOcppKey": "CentralSystemAddress",
@@ -17,39 +18,79 @@
   "Configuration": {
     "configurationKey": [
       {
-        "key": "MeterValuesSampledData",
-        "readonly": false,
-        "value": "Energy.Active.Import.Register,Power.Active.Import,Current.Import,Voltage"
-      },
-      {
-        "key": "MeterValueSampleInterval",
-        "readonly": false,
-        "value": "30"
-      },
-      {
-        "key": "SupportedFeatureProfiles",
-        "readonly": true,
-        "value": "Core,FirmwareManagement,LocalAuthListManagement,SmartCharging,RemoteTrigger,Reservation"
-      },
-      {
-        "key": "LocalAuthListEnabled",
+        "key": "AuthCtrlr.AuthorizeRemoteStart",
         "readonly": false,
         "value": "false"
       },
       {
-        "key": "AuthorizeRemoteTxRequests",
+        "key": "AuthCtrlr.LocalAuthorizationOffline",
+        "readonly": false,
+        "value": "true"
+      },
+      {
+        "key": "AuthCtrlr.LocalPreAuthorization",
         "readonly": false,
         "value": "false"
       },
       {
-        "key": "WebSocketPingInterval",
+        "key": "AuthCtrlr.OfflineTxForUnknownIdEnabled",
+        "readonly": false,
+        "value": "false"
+      },
+      {
+        "key": "OCPPCommCtrlr.WebSocketPingInterval",
         "readonly": false,
         "value": "60"
       },
       {
-        "key": "ReserveConnectorZeroSupported",
+        "key": "LocalAuthListCtrlr.Enabled",
         "readonly": false,
         "value": "false"
+      },
+      {
+        "key": "OCPPCommCtrlr.MessageAttemptInterval.TransactionEvent",
+        "readonly": false,
+        "value": "20"
+      },
+      {
+        "key": "OCPPCommCtrlr.MessageAttempts.TransactionEvent",
+        "readonly": false,
+        "value": "3"
+      },
+      {
+        "key": "ReservationCtrlr.Enabled",
+        "readonly": false,
+        "value": "false"
+      },
+      {
+        "key": "ReservationCtrlr.NonEvseSpecific",
+        "readonly": false,
+        "value": "false"
+      },
+      {
+        "key": "SampledDataCtrlr.TxUpdatedInterval",
+        "readonly": false,
+        "value": "30"
+      },
+      {
+        "key": "SampledDataCtrlr.TxUpdatedMeasurands",
+        "readonly": false,
+        "value": "Energy.Active.Import.Register,Power.Active.Import,Current.Import,Voltage"
+      },
+      {
+        "key": "SampledDataCtrlr.TxStartedMeasurands",
+        "readonly": false,
+        "value": "Energy.Active.Import.Register"
+      },
+      {
+        "key": "SampledDataCtrlr.TxEndedMeasurands",
+        "readonly": false,
+        "value": "Energy.Active.Import.Register"
+      },
+      {
+        "key": "TxCtrlr.EVConnectionTimeOut",
+        "readonly": false,
+        "value": "180"
       }
     ]
   },

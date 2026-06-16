@@ -6,19 +6,30 @@
  */
 
 import assert from 'node:assert/strict'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 
-import type { ChargingStation } from '../../../../src/charging-station/ChargingStation.js'
+import type { ChargingStation } from '../../../../src/charging-station/index.js'
 import type { TestableOCPP16IncomingRequestService } from '../../../../src/charging-station/ocpp/1.6/__testable__/index.js'
+import type { GenericResponse, RemoteStopTransactionRequest } from '../../../../src/types/index.js'
 
-import { OCPP16UnlockStatus } from '../../../../src/types/ocpp/1.6/Responses.js'
-import { OCPP16AuthorizationStatus } from '../../../../src/types/ocpp/1.6/Transaction.js'
-import { GenericStatus } from '../../../../src/types/ocpp/Common.js'
+import { OCPP16IncomingRequestService } from '../../../../src/charging-station/ocpp/1.6/OCPP16IncomingRequestService.js'
+import { OCPP16ServiceUtils } from '../../../../src/charging-station/ocpp/1.6/OCPP16ServiceUtils.js'
 import {
+  GenericStatus,
+  OCPP16AuthorizationStatus,
+  OCPP16IncomingRequestCommand,
+  OCPP16UnlockStatus,
+} from '../../../../src/types/index.js'
+import {
+  flushMicrotasks,
   setupConnectorWithTransaction,
   standardCleanup,
 } from '../../../helpers/TestLifecycleHelpers.js'
-import { createOCPP16IncomingRequestTestContext, setMockRequestHandler } from './OCPP16TestUtils.js'
+import {
+  createOCPP16IncomingRequestTestContext,
+  createOCPP16ListenerStation,
+  setMockRequestHandler,
+} from './OCPP16TestUtils.js'
 
 await describe('OCPP16IncomingRequestService — RemoteStopTransaction and UnlockConnector', async () => {
   let station: ChargingStation
@@ -34,9 +45,10 @@ await describe('OCPP16IncomingRequestService — RemoteStopTransaction and Unloc
       Promise.resolve({ idTagInfo: { status: OCPP16AuthorizationStatus.ACCEPTED } })
     )
 
-    // Mock stopTransactionOnConnector — called by UnlockConnector when transaction is active
-    station.stopTransactionOnConnector = async () =>
+    // Mock OCPP16ServiceUtils.stopTransactionOnConnector — called by UnlockConnector when transaction is active
+    mock.method(OCPP16ServiceUtils, 'stopTransactionOnConnector', async () =>
       Promise.resolve({ idTagInfo: { status: OCPP16AuthorizationStatus.ACCEPTED } })
+    )
   })
 
   afterEach(() => {
@@ -136,8 +148,9 @@ await describe('OCPP16IncomingRequestService — RemoteStopTransaction and Unloc
     await it('should return UnlockFailed when active transaction stop is rejected', async () => {
       // Arrange
       setupConnectorWithTransaction(station, 1, { transactionId: 200 })
-      station.stopTransactionOnConnector = async () =>
+      mock.method(OCPP16ServiceUtils, 'stopTransactionOnConnector', async () =>
         Promise.resolve({ idTagInfo: { status: OCPP16AuthorizationStatus.INVALID } })
+      )
 
       // Act
       const response = await testableService.handleRequestUnlockConnector(station, {
@@ -157,6 +170,102 @@ await describe('OCPP16IncomingRequestService — RemoteStopTransaction and Unloc
       // Assert
       assert.strictEqual(Object.keys(response).length, 1)
       assert.notStrictEqual(response.status, undefined)
+    })
+  })
+
+  await describe('REMOTE_STOP_TRANSACTION event listener', async () => {
+    let incomingRequestService: OCPP16IncomingRequestService
+    let listenerStation: ChargingStation
+
+    beforeEach(() => {
+      incomingRequestService = new OCPP16IncomingRequestService()
+      ;({ station: listenerStation } = createOCPP16ListenerStation('test-remote-stop-listener'))
+    })
+
+    afterEach(() => {
+      standardCleanup()
+    })
+
+    await it('should register REMOTE_STOP_TRANSACTION event listener in constructor', () => {
+      // Assert
+      assert.strictEqual(
+        incomingRequestService.listenerCount(OCPP16IncomingRequestCommand.REMOTE_STOP_TRANSACTION),
+        1
+      )
+    })
+
+    await it('should call remoteStopTransaction when response is Accepted', async () => {
+      // Arrange
+      setupConnectorWithTransaction(listenerStation, 1, { transactionId: 42 })
+
+      const mockRemoteStop = mock.method(OCPP16ServiceUtils, 'remoteStopTransaction', async () =>
+        Promise.resolve({ status: GenericStatus.Accepted } satisfies GenericResponse)
+      )
+
+      const request: RemoteStopTransactionRequest = { transactionId: 42 }
+      const response: GenericResponse = { status: GenericStatus.Accepted }
+
+      // Act
+      incomingRequestService.emit(
+        OCPP16IncomingRequestCommand.REMOTE_STOP_TRANSACTION,
+        listenerStation,
+        request,
+        response
+      )
+
+      // Flush microtask queue so the async .then() executes
+      await flushMicrotasks()
+
+      // Assert
+      assert.strictEqual(mockRemoteStop.mock.callCount(), 1)
+      assert.strictEqual(mockRemoteStop.mock.calls[0].arguments[0], listenerStation)
+      assert.strictEqual(mockRemoteStop.mock.calls[0].arguments[1], 1)
+    })
+
+    await it('should NOT call remoteStopTransaction when response is Rejected', () => {
+      // Arrange
+      const mockRemoteStop = mock.method(OCPP16ServiceUtils, 'remoteStopTransaction', async () =>
+        Promise.resolve({ status: GenericStatus.Rejected } satisfies GenericResponse)
+      )
+
+      const request: RemoteStopTransactionRequest = { transactionId: 99 }
+      const response: GenericResponse = { status: GenericStatus.Rejected }
+
+      // Act
+      incomingRequestService.emit(
+        OCPP16IncomingRequestCommand.REMOTE_STOP_TRANSACTION,
+        listenerStation,
+        request,
+        response
+      )
+
+      // Assert
+      assert.strictEqual(mockRemoteStop.mock.callCount(), 0)
+    })
+
+    await it('should handle remoteStopTransaction failure gracefully', async () => {
+      // Arrange
+      setupConnectorWithTransaction(listenerStation, 1, { transactionId: 77 })
+
+      mock.method(OCPP16ServiceUtils, 'remoteStopTransaction', async () =>
+        Promise.reject(new Error('remoteStopTransaction failed'))
+      )
+
+      const request: RemoteStopTransactionRequest = { transactionId: 77 }
+      const response: GenericResponse = { status: GenericStatus.Accepted }
+
+      // Act — should not throw
+      incomingRequestService.emit(
+        OCPP16IncomingRequestCommand.REMOTE_STOP_TRANSACTION,
+        listenerStation,
+        request,
+        response
+      )
+
+      // Flush microtask queue so .catch() executes
+      await flushMicrotasks()
+
+      // Assert — no crash, test completes normally
     })
   })
 })

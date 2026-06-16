@@ -5,12 +5,12 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 
-import type { ChargingStation } from '../../src/charging-station/ChargingStation.js'
+import type { ChargingStation } from '../../src/charging-station/index.js'
 
 import { AvailabilityType, RegistrationStatusEnumType } from '../../src/types/index.js'
 import { standardCleanup, withMockTimers } from '../helpers/TestLifecycleHelpers.js'
 import { TEST_HEARTBEAT_INTERVAL_MS, TEST_ONE_HOUR_MS } from './ChargingStationTestConstants.js'
-import { cleanupChargingStation, createMockChargingStation } from './ChargingStationTestUtils.js'
+import { cleanupChargingStation, createMockChargingStation } from './helpers/StationHelpers.js'
 
 await describe('ChargingStation Configuration Management', async () => {
   // ===== B02/B03 BOOT NOTIFICATION BEHAVIOR TESTS =====
@@ -40,7 +40,7 @@ await describe('ChargingStation Configuration Management', async () => {
       if (station.bootNotificationResponse == null) {
         assert.fail('Expected bootNotificationResponse to be defined')
       }
-      assert.ok(station.bootNotificationResponse.interval > 0)
+      assert.strictEqual(station.bootNotificationResponse.interval > 0, true)
       assert.strictEqual(station.inPendingState(), true)
     })
 
@@ -140,7 +140,7 @@ await describe('ChargingStation Configuration Management', async () => {
       if (station.bootNotificationResponse == null) {
         assert.fail('Expected bootNotificationResponse to be defined')
       }
-      assert.ok(station.bootNotificationResponse.interval > 0)
+      assert.strictEqual(station.bootNotificationResponse.interval > 0, true)
       assert.strictEqual(station.inRejectedState(), true)
     })
 
@@ -756,7 +756,7 @@ await describe('ChargingStation Configuration Management', async () => {
       // Assert
       assert.notStrictEqual(mocks.webSocket.url, undefined)
       assert.strictEqual(typeof mocks.webSocket.url, 'string')
-      assert.ok(mocks.webSocket.url.length > 0)
+      assert.strictEqual(mocks.webSocket.url.length > 0, true)
     })
   })
 
@@ -783,7 +783,7 @@ await describe('ChargingStation Configuration Management', async () => {
         const pingInterval = station.getWebSocketPingInterval()
 
         // Assert - should return a valid interval value
-        assert.ok(pingInterval >= 0)
+        assert.strictEqual(pingInterval >= 0, true)
         assert.strictEqual(typeof pingInterval, 'number')
       })
     })

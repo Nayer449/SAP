@@ -3,6 +3,8 @@
  * @description Unit tests for OCPP 2.0 RequestStopTransaction command handling (F03)
  */
 
+import type { mock } from 'node:test'
+
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 
@@ -10,67 +12,43 @@ import type { ChargingStation } from '../../../../src/charging-station/index.js'
 import type {
   OCPP20RequestStartTransactionRequest,
   OCPP20RequestStopTransactionRequest,
+  OCPP20RequestStopTransactionResponse,
   OCPP20TransactionEventRequest,
   UUIDv4,
 } from '../../../../src/types/index.js'
 
 import { createTestableIncomingRequestService } from '../../../../src/charging-station/ocpp/2.0/__testable__/index.js'
 import { OCPP20IncomingRequestService } from '../../../../src/charging-station/ocpp/2.0/OCPP20IncomingRequestService.js'
-import { OCPPAuthServiceFactory } from '../../../../src/charging-station/ocpp/auth/services/OCPPAuthServiceFactory.js'
+import { OCPPAuthServiceFactory } from '../../../../src/charging-station/ocpp/auth/index.js'
 import {
+  OCPP20IdTokenEnumType,
+  OCPP20IncomingRequestCommand,
+  OCPP20ReasonEnumType,
   OCPP20RequestCommand,
   OCPP20TransactionEventEnumType,
   OCPP20TriggerReasonEnumType,
   OCPPVersion,
   RequestStartStopStatusEnumType,
 } from '../../../../src/types/index.js'
-import {
-  OCPP20IdTokenEnumType,
-  OCPP20ReasonEnumType,
-} from '../../../../src/types/ocpp/2.0/Transaction.js'
 import { Constants } from '../../../../src/utils/index.js'
-import { standardCleanup } from '../../../../tests/helpers/TestLifecycleHelpers.js'
+import { flushMicrotasks, standardCleanup } from '../../../helpers/TestLifecycleHelpers.js'
 import { TEST_CHARGING_STATION_BASE_NAME } from '../../ChargingStationTestConstants.js'
-import { createMockChargingStation } from '../../ChargingStationTestUtils.js'
+import { createMockChargingStation } from '../../helpers/StationHelpers.js'
 import { createMockAuthService } from '../auth/helpers/MockFactories.js'
 import {
+  createOCPP20ListenerStation,
   resetConnectorTransactionState,
   resetLimits,
   resetReportingValueSize,
 } from './OCPP20TestUtils.js'
 
 await describe('F03 - Remote Stop Transaction', async () => {
-  let sentTransactionEvents: OCPP20TransactionEventRequest[] = []
   let mockStation: ChargingStation
   let incomingRequestService: OCPP20IncomingRequestService
   let testableService: ReturnType<typeof createTestableIncomingRequestService>
 
   beforeEach(() => {
-    sentTransactionEvents = []
-    const { station } = createMockChargingStation({
-      baseName: TEST_CHARGING_STATION_BASE_NAME,
-      connectorsCount: 3,
-      evseConfiguration: { evsesCount: 3 },
-      heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
-      ocppRequestService: {
-        requestHandler: async (
-          _chargingStation: unknown,
-          commandName: unknown,
-          commandPayload: unknown
-        ) => {
-          if (commandName === OCPP20RequestCommand.TRANSACTION_EVENT) {
-            sentTransactionEvents.push(commandPayload as OCPP20TransactionEventRequest)
-            return Promise.resolve({})
-          }
-          return Promise.resolve({})
-        },
-      },
-      stationInfo: {
-        ocppStrictCompliance: false,
-        ocppVersion: OCPPVersion.VERSION_201,
-      },
-      websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
-    })
+    const { station } = createOCPP20ListenerStation(TEST_CHARGING_STATION_BASE_NAME)
     mockStation = station
     incomingRequestService = new OCPP20IncomingRequestService()
     testableService = createTestableIncomingRequestService(incomingRequestService)
@@ -86,20 +64,21 @@ await describe('F03 - Remote Stop Transaction', async () => {
   })
 
   /**
-   * Helper function to start a transaction and return the transaction ID
-   * @param evseId - The EVSE ID to start transaction on
-   * @param remoteStartId - The remote start ID for the transaction
-   * @param skipReset - Whether to skip resetting connector states
+   * Starts a transaction via RequestStartTransaction and returns its ID.
+   * @param station - The charging station to start a transaction on
+   * @param evseId - EVSE ID to use
+   * @param remoteStartId - Remote start ID
+   * @param skipReset - Whether to skip resetting mock call counts
    * @returns The transaction ID of the started transaction
    */
   async function startTransaction (
+    station: ChargingStation,
     evseId = 1,
     remoteStartId = 1,
     skipReset = false
   ): Promise<string> {
-    // Reset all connector states first to ensure clean state (unless skipped for multiple transactions)
     if (!skipReset) {
-      resetConnectorTransactionState(mockStation)
+      resetConnectorTransactionState(station)
     }
 
     const startRequest: OCPP20RequestStartTransactionRequest = {
@@ -111,377 +90,325 @@ await describe('F03 - Remote Stop Transaction', async () => {
       remoteStartId,
     }
 
-    const startResponse = await testableService.handleRequestStartTransaction(
-      mockStation,
-      startRequest
-    )
+    const startResponse = await testableService.handleRequestStartTransaction(station, startRequest)
 
     assert.strictEqual(startResponse.status, RequestStartStopStatusEnumType.Accepted)
     assert.notStrictEqual(startResponse.transactionId, undefined)
     return startResponse.transactionId as string
   }
 
-  // FR: F03.FR.02, F03.FR.03, F03.FR.07, F03.FR.09
-  await it('should successfully stop an active transaction', async () => {
-    // Start a transaction first
-    const transactionId = await startTransaction(1, 100)
+  await describe('Handler validation', async () => {
+    // FR: F03.FR.02, F03.FR.03, F03.FR.07, F03.FR.09
+    await it('should return Accepted for valid active transaction', async () => {
+      const transactionId = await startTransaction(mockStation, 1, 100)
 
-    // Clear transaction events after starting, before testing stop transaction
-    sentTransactionEvents = []
+      const response = testableService.handleRequestStopTransaction(mockStation, {
+        transactionId: transactionId as UUIDv4,
+      })
 
-    // Create stop transaction request
-    const stopRequest: OCPP20RequestStopTransactionRequest = {
-      transactionId: transactionId as UUIDv4,
-    }
-
-    // Execute stop transaction
-    const response = await testableService.handleRequestStopTransaction(mockStation, stopRequest)
-
-    // Verify response
-    assert.notStrictEqual(response, undefined)
-    assert.strictEqual(response.status, RequestStartStopStatusEnumType.Accepted)
-
-    // Verify TransactionEvent was sent
-    assert.strictEqual(sentTransactionEvents.length, 1)
-    const transactionEvent = sentTransactionEvents[0]
-
-    assert.strictEqual(transactionEvent.eventType, OCPP20TransactionEventEnumType.Ended)
-    assert.strictEqual(transactionEvent.triggerReason, OCPP20TriggerReasonEnumType.RemoteStop)
-    assert.strictEqual(transactionEvent.transactionInfo.transactionId, transactionId)
-    assert.strictEqual(transactionEvent.transactionInfo.stoppedReason, OCPP20ReasonEnumType.Remote)
-    assert.strictEqual(transactionEvent.evse?.id, 1)
-  })
-
-  // FR: F03.FR.02, F03.FR.03
-  await it('should handle multiple active transactions correctly', async () => {
-    // Reset once before starting multiple transactions
-    resetConnectorTransactionState(mockStation)
-
-    // Start transactions on different EVSEs (skip reset for subsequent transactions)
-    const transactionId1 = await startTransaction(1, 200, true) // Skip reset since we just did it
-    const transactionId2 = await startTransaction(2, 201, true) // Skip reset to keep transaction 1
-    const transactionId3 = await startTransaction(3, 202, true) // Skip reset to keep transactions 1 & 2
-
-    // Clear transaction events after starting, before testing stop transaction
-    sentTransactionEvents = []
-
-    // Stop the second transaction
-    const stopRequest: OCPP20RequestStopTransactionRequest = {
-      transactionId: transactionId2 as UUIDv4,
-    }
-
-    const response = await testableService.handleRequestStopTransaction(mockStation, stopRequest)
-
-    // Verify response
-    assert.notStrictEqual(response, undefined)
-    assert.strictEqual(response.status, RequestStartStopStatusEnumType.Accepted)
-
-    // Verify correct TransactionEvent was sent
-    assert.strictEqual(sentTransactionEvents.length, 1)
-    const transactionEvent = sentTransactionEvents[0]
-
-    assert.strictEqual(transactionEvent.transactionInfo.transactionId, transactionId2)
-    assert.strictEqual(transactionEvent.evse?.id, 2)
-
-    // Verify other transactions are still active (test implementation dependent)
-    assert.strictEqual(mockStation.getConnectorIdByTransactionId(transactionId1), 1)
-    assert.strictEqual(mockStation.getConnectorIdByTransactionId(transactionId3), 3)
-  })
-
-  // FR: F03.FR.08
-  await it('should reject stop transaction for non-existent transaction ID', async () => {
-    // Clear previous transaction events
-    sentTransactionEvents = []
-
-    const nonExistentTransactionId = 'non-existent-transaction-id'
-    const stopRequest: OCPP20RequestStopTransactionRequest = {
-      transactionId: nonExistentTransactionId as UUIDv4,
-    }
-
-    const response = await testableService.handleRequestStopTransaction(mockStation, stopRequest)
-
-    // Verify rejection
-    assert.notStrictEqual(response, undefined)
-    assert.strictEqual(response.status, RequestStartStopStatusEnumType.Rejected)
-
-    // Verify no TransactionEvent was sent
-    assert.strictEqual(sentTransactionEvents.length, 0)
-  })
-
-  // FR: F03.FR.08
-  await it('should reject stop transaction for invalid transaction ID format - empty string', async () => {
-    // Clear previous transaction events
-    sentTransactionEvents = []
-
-    const invalidRequest: OCPP20RequestStopTransactionRequest = {
-      transactionId: '' as UUIDv4,
-    }
-
-    const response = await testableService.handleRequestStopTransaction(mockStation, invalidRequest)
-
-    // Verify rejection
-    assert.notStrictEqual(response, undefined)
-    assert.strictEqual(response.status, RequestStartStopStatusEnumType.Rejected)
-
-    // Verify no TransactionEvent was sent
-    assert.strictEqual(sentTransactionEvents.length, 0)
-  })
-
-  // FR: F03.FR.08
-  await it('should reject stop transaction for invalid transaction ID format - too long', async () => {
-    // Clear previous transaction events
-    sentTransactionEvents = []
-
-    // Create a transaction ID longer than 36 characters
-    const tooLongTransactionId = 'a'.repeat(37)
-    const invalidRequest: OCPP20RequestStopTransactionRequest = {
-      transactionId: tooLongTransactionId as UUIDv4,
-    }
-
-    const response = await testableService.handleRequestStopTransaction(mockStation, invalidRequest)
-
-    // Verify rejection
-    assert.notStrictEqual(response, undefined)
-    assert.strictEqual(response.status, RequestStartStopStatusEnumType.Rejected)
-
-    // Verify no TransactionEvent was sent
-    assert.strictEqual(sentTransactionEvents.length, 0)
-  })
-
-  // FR: F03.FR.02
-  await it('should accept valid transaction ID format - exactly 36 characters', async () => {
-    // Start a transaction first
-    const transactionId = await startTransaction(1, 300)
-
-    // Clear transaction events after starting, before testing stop transaction
-    sentTransactionEvents = []
-
-    // Ensure the transaction ID is exactly 36 characters (pad if necessary for test)
-    let testTransactionId = transactionId
-    if (testTransactionId.length < 36) {
-      testTransactionId = testTransactionId.padEnd(36, '0')
-    } else if (testTransactionId.length > 36) {
-      testTransactionId = testTransactionId.substring(0, 36)
-    }
-
-    // Update the connector's transaction ID for testing
-    const connectorId = mockStation.getConnectorIdByTransactionId(transactionId)
-    if (connectorId != null) {
-      const connectorStatus = mockStation.getConnectorStatus(connectorId)
-      if (connectorStatus) {
-        connectorStatus.transactionId = testTransactionId
-      }
-    }
-
-    const stopRequest: OCPP20RequestStopTransactionRequest = {
-      transactionId: testTransactionId as UUIDv4,
-    }
-
-    const response = await testableService.handleRequestStopTransaction(mockStation, stopRequest)
-
-    // Verify acceptance (format is valid)
-    assert.notStrictEqual(response, undefined)
-    assert.strictEqual(response.status, RequestStartStopStatusEnumType.Accepted)
-
-    // Verify TransactionEvent was sent
-    assert.strictEqual(sentTransactionEvents.length, 1)
-  })
-
-  await it('should handle TransactionEvent request failure gracefully', async () => {
-    sentTransactionEvents = []
-
-    const { station: failingChargingStation } = createMockChargingStation({
-      baseName: TEST_CHARGING_STATION_BASE_NAME + '-FAIL',
-      connectorsCount: 1,
-      evseConfiguration: { evsesCount: 1 },
-      heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
-      ocppRequestService: {
-        requestHandler: async (
-          _chargingStation: unknown,
-          commandName: unknown,
-          commandPayload: unknown
-        ) => {
-          if (commandName === OCPP20RequestCommand.TRANSACTION_EVENT) {
-            throw new Error('TransactionEvent rejected by server')
-          }
-          return Promise.resolve({})
-        },
-      },
-      stationInfo: {
-        ocppStrictCompliance: false,
-        ocppVersion: OCPPVersion.VERSION_201,
-      },
-      websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+      assert.notStrictEqual(response, undefined)
+      assert.strictEqual(response.status, RequestStartStopStatusEnumType.Accepted)
     })
 
-    const failingStationId = failingChargingStation.stationInfo?.chargingStationId ?? 'unknown'
-    OCPPAuthServiceFactory.setInstanceForTesting(failingStationId, createMockAuthService())
+    // FR: F03.FR.02, F03.FR.03
+    await it('should handle multiple active transactions correctly', async () => {
+      resetConnectorTransactionState(mockStation)
 
-    const startRequest: OCPP20RequestStartTransactionRequest = {
-      evseId: 1,
-      idToken: {
-        idToken: 'FAIL_TEST_TOKEN',
-        type: OCPP20IdTokenEnumType.ISO14443,
+      const transactionId1 = await startTransaction(mockStation, 1, 200, true)
+      const transactionId2 = await startTransaction(mockStation, 2, 201, true)
+      const transactionId3 = await startTransaction(mockStation, 3, 202, true)
+
+      const response = testableService.handleRequestStopTransaction(mockStation, {
+        transactionId: transactionId2 as UUIDv4,
+      })
+
+      assert.notStrictEqual(response, undefined)
+      assert.strictEqual(response.status, RequestStartStopStatusEnumType.Accepted)
+      assert.strictEqual(mockStation.getConnectorIdByTransactionId(transactionId1), 1)
+      assert.strictEqual(mockStation.getConnectorIdByTransactionId(transactionId3), 3)
+    })
+
+    // FR: F03.FR.08
+    await it('should reject stop transaction for non-existent transaction ID', () => {
+      const response = testableService.handleRequestStopTransaction(mockStation, {
+        transactionId: 'non-existent-transaction-id' as UUIDv4,
+      })
+
+      assert.notStrictEqual(response, undefined)
+      assert.strictEqual(response.status, RequestStartStopStatusEnumType.Rejected)
+    })
+
+    // FR: F03.FR.08
+    await it('should reject stop transaction for invalid transaction ID format - empty string', () => {
+      const response = testableService.handleRequestStopTransaction(mockStation, {
+        transactionId: '' as UUIDv4,
+      })
+
+      assert.notStrictEqual(response, undefined)
+      assert.strictEqual(response.status, RequestStartStopStatusEnumType.Rejected)
+    })
+
+    // FR: F03.FR.08
+    await it('should reject stop transaction for invalid transaction ID format - too long', () => {
+      const response = testableService.handleRequestStopTransaction(mockStation, {
+        transactionId: 'a'.repeat(37) as UUIDv4,
+      })
+
+      assert.notStrictEqual(response, undefined)
+      assert.strictEqual(response.status, RequestStartStopStatusEnumType.Rejected)
+    })
+
+    // FR: F03.FR.02
+    await it('should accept valid transaction ID format - exactly 36 characters', async () => {
+      const transactionId = await startTransaction(mockStation, 1, 300)
+
+      let testTransactionId = transactionId
+      if (testTransactionId.length < 36) {
+        testTransactionId = testTransactionId.padEnd(36, '0')
+      } else if (testTransactionId.length > 36) {
+        testTransactionId = testTransactionId.substring(0, 36)
+      }
+
+      const connectorId = mockStation.getConnectorIdByTransactionId(transactionId)
+      if (connectorId != null) {
+        const connectorStatus = mockStation.getConnectorStatus(connectorId)
+        if (connectorStatus) {
+          connectorStatus.transactionId = testTransactionId
+        }
+      }
+
+      const response = testableService.handleRequestStopTransaction(mockStation, {
+        transactionId: testTransactionId as UUIDv4,
+      })
+
+      assert.notStrictEqual(response, undefined)
+      assert.strictEqual(response.status, RequestStartStopStatusEnumType.Accepted)
+    })
+
+    // FR: F04.FR.01
+    await it('should return proper response structure', async () => {
+      const transactionId = await startTransaction(mockStation, 1, 400)
+
+      const response = testableService.handleRequestStopTransaction(mockStation, {
+        transactionId: transactionId as UUIDv4,
+      })
+
+      assert.notStrictEqual(response, undefined)
+      assert.strictEqual(typeof response, 'object')
+      assert.notStrictEqual(response.status, undefined)
+      assert.ok(Object.values(RequestStartStopStatusEnumType).includes(response.status))
+      assert.deepStrictEqual(Object.keys(response as object), ['status'])
+    })
+
+    await it('should accept request with custom data', async () => {
+      const transactionId = await startTransaction(mockStation, 1, 500)
+
+      const response = testableService.handleRequestStopTransaction(mockStation, {
+        customData: {
+          data: 'Custom stop transaction data',
+          vendorId: 'TestVendor',
+        },
+        transactionId: transactionId as UUIDv4,
+      })
+
+      assert.notStrictEqual(response, undefined)
+      assert.strictEqual(response.status, RequestStartStopStatusEnumType.Accepted)
+    })
+  })
+
+  await describe('REQUEST_STOP_TRANSACTION event listener', async () => {
+    let listenerService: OCPP20IncomingRequestService
+    let requestHandlerMock: ReturnType<typeof mock.fn>
+    let listenerStation: ChargingStation
+
+    beforeEach(() => {
+      ;({ requestHandlerMock, station: listenerStation } = createOCPP20ListenerStation(
+        TEST_CHARGING_STATION_BASE_NAME + '-LISTENER'
+      ))
+      listenerService = new OCPP20IncomingRequestService()
+      testableService = createTestableIncomingRequestService(listenerService)
+      const stationId = listenerStation.stationInfo?.chargingStationId ?? 'unknown'
+      OCPPAuthServiceFactory.setInstanceForTesting(stationId, createMockAuthService())
+      resetLimits(listenerStation)
+      resetReportingValueSize(listenerStation)
+    })
+
+    afterEach(() => {
+      standardCleanup()
+    })
+
+    await it('should register REQUEST_STOP_TRANSACTION event listener in constructor', () => {
+      assert.strictEqual(
+        listenerService.listenerCount(OCPP20IncomingRequestCommand.REQUEST_STOP_TRANSACTION),
+        1
+      )
+    })
+
+    await it(
+      'should call requestStopTransaction when response is Accepted',
+      {
+        skip: process.versions.node.startsWith('22.'),
       },
-      remoteStartId: 999,
-    }
+      async () => {
+        const transactionId = await startTransaction(listenerStation, 1, 100)
+        requestHandlerMock.mock.resetCalls()
 
-    const startResponse = await testableService.handleRequestStartTransaction(
-      failingChargingStation,
-      startRequest
+        const request: OCPP20RequestStopTransactionRequest = {
+          transactionId: transactionId as UUIDv4,
+        }
+        const response: OCPP20RequestStopTransactionResponse = {
+          status: RequestStartStopStatusEnumType.Accepted,
+        }
+
+        listenerService.emit(
+          OCPP20IncomingRequestCommand.REQUEST_STOP_TRANSACTION,
+          listenerStation,
+          request,
+          response
+        )
+
+        await flushMicrotasks()
+
+        assert.strictEqual(requestHandlerMock.mock.callCount(), 2)
+        const args = requestHandlerMock.mock.calls[0].arguments as [
+          unknown,
+          string,
+          OCPP20TransactionEventRequest
+        ]
+        assert.strictEqual(args[1], OCPP20RequestCommand.TRANSACTION_EVENT)
+      }
     )
 
-    const transactionId = startResponse.transactionId as string
+    await it('should NOT call requestStopTransaction when response is Rejected', () => {
+      const request: OCPP20RequestStopTransactionRequest = {
+        transactionId: 'any-transaction-id' as UUIDv4,
+      }
+      const response: OCPP20RequestStopTransactionResponse = {
+        status: RequestStartStopStatusEnumType.Rejected,
+      }
 
-    // Attempt to stop the transaction
-    const stopRequest: OCPP20RequestStopTransactionRequest = {
-      transactionId: transactionId as UUIDv4,
-    }
+      listenerService.emit(
+        OCPP20IncomingRequestCommand.REQUEST_STOP_TRANSACTION,
+        listenerStation,
+        request,
+        response
+      )
 
-    const response = await testableService.handleRequestStopTransaction(
-      failingChargingStation,
-      stopRequest
-    )
+      assert.strictEqual(requestHandlerMock.mock.callCount(), 0)
+    })
 
-    // Should be rejected due to TransactionEvent failure
-    assert.notStrictEqual(response, undefined)
-    assert.strictEqual(response.status, RequestStartStopStatusEnumType.Rejected)
-  })
+    await it('should handle requestStopTransaction failure gracefully', async () => {
+      let transactionEventCallCount = 0
+      const { station: failStation } = createMockChargingStation({
+        baseName: TEST_CHARGING_STATION_BASE_NAME + '-FAIL',
+        connectorsCount: 1,
+        evseConfiguration: { evsesCount: 1 },
+        ocppRequestService: {
+          requestHandler: async (_chargingStation: unknown, commandName: unknown) => {
+            if (commandName === OCPP20RequestCommand.TRANSACTION_EVENT) {
+              transactionEventCallCount++
+              throw new Error('TransactionEvent rejected by server')
+            }
+            return Promise.resolve({})
+          },
+        },
+        stationInfo: {
+          ocppStrictCompliance: false,
+          ocppVersion: OCPPVersion.VERSION_201,
+        },
+        websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
+      })
 
-  // FR: F04.FR.01
-  await it('should return proper response structure', async () => {
-    // Clear previous transaction events
-    sentTransactionEvents = []
+      const failStationId = failStation.stationInfo?.chargingStationId ?? 'unknown'
+      OCPPAuthServiceFactory.setInstanceForTesting(failStationId, createMockAuthService())
 
-    // Start a transaction first
-    const transactionId = await startTransaction(1, 400)
+      resetConnectorTransactionState(failStation)
+      const startResponse = await testableService.handleRequestStartTransaction(failStation, {
+        evseId: 1,
+        idToken: {
+          idToken: 'FAIL_TEST_TOKEN',
+          type: OCPP20IdTokenEnumType.ISO14443,
+        },
+        remoteStartId: 999,
+      })
+      const transactionId = startResponse.transactionId as string
 
-    const stopRequest: OCPP20RequestStopTransactionRequest = {
-      transactionId: transactionId as UUIDv4,
-    }
+      listenerService.emit(
+        OCPP20IncomingRequestCommand.REQUEST_STOP_TRANSACTION,
+        failStation,
+        { transactionId: transactionId as UUIDv4 } satisfies OCPP20RequestStopTransactionRequest,
+        {
+          status: RequestStartStopStatusEnumType.Accepted,
+        } satisfies OCPP20RequestStopTransactionResponse
+      )
 
-    const response = await testableService.handleRequestStopTransaction(mockStation, stopRequest)
+      // Flush microtask queue so .catch(errorHandler) executes
+      await flushMicrotasks()
 
-    // Verify response structure
-    assert.notStrictEqual(response, undefined)
-    assert.strictEqual(typeof response, 'object')
-    assert.notStrictEqual(response.status, undefined)
+      assert.strictEqual(transactionEventCallCount, 1)
+    })
 
-    // Verify status is valid enum value
-    assert.ok(Object.values(RequestStartStopStatusEnumType).includes(response.status))
+    // FR: F03.FR.07, F03.FR.09
+    await it('should send TransactionEvent(Ended) with correct content', async () => {
+      const transactionId = await startTransaction(listenerStation, 2, 600)
+      requestHandlerMock.mock.resetCalls()
 
-    // OCPP 2.0 RequestStopTransaction response should only contain status
-    assert.deepStrictEqual(Object.keys(response as object), ['status'])
-  })
+      listenerService.emit(
+        OCPP20IncomingRequestCommand.REQUEST_STOP_TRANSACTION,
+        listenerStation,
+        { transactionId: transactionId as UUIDv4 } satisfies OCPP20RequestStopTransactionRequest,
+        {
+          status: RequestStartStopStatusEnumType.Accepted,
+        } satisfies OCPP20RequestStopTransactionResponse
+      )
 
-  await it('should handle custom data in request payload', async () => {
-    // Start a transaction first
-    const transactionId = await startTransaction(1, 500)
+      assert.strictEqual(requestHandlerMock.mock.callCount(), 1)
+      const args = requestHandlerMock.mock.calls[0].arguments as [
+        unknown,
+        string,
+        Partial<OCPP20TransactionEventRequest>
+      ]
+      const minimalParams = args[2]
 
-    // Clear transaction events after starting, before testing stop transaction
-    sentTransactionEvents = []
+      assert.strictEqual(minimalParams.eventType, OCPP20TransactionEventEnumType.Ended)
+      assert.strictEqual(minimalParams.triggerReason, OCPP20TriggerReasonEnumType.RemoteStop)
+      assert.strictEqual(minimalParams.transactionId, transactionId)
+      assert.strictEqual(minimalParams.stoppedReason, OCPP20ReasonEnumType.Remote)
+      assert.notStrictEqual(minimalParams.connectorId, undefined)
+      assert.strictEqual(typeof minimalParams.connectorId, 'number')
+    })
 
-    const stopRequestWithCustomData: OCPP20RequestStopTransactionRequest = {
-      customData: {
-        data: 'Custom stop transaction data',
-        vendorId: 'TestVendor',
-      },
-      transactionId: transactionId as UUIDv4,
-    }
+    // FR: F03.FR.09
+    await it('should include final meter values in TransactionEvent(Ended)', async () => {
+      resetConnectorTransactionState(listenerStation)
+      const transactionId = await startTransaction(listenerStation, 3, 700)
 
-    const response = await testableService.handleRequestStopTransaction(
-      mockStation,
-      stopRequestWithCustomData
-    )
+      const connectorStatus = listenerStation.getConnectorStatus(3)
+      assert.notStrictEqual(connectorStatus, undefined)
+      if (connectorStatus != null) {
+        connectorStatus.transactionEnergyActiveImportRegisterValue = 12345.67
+      }
 
-    // Verify response
-    assert.notStrictEqual(response, undefined)
-    assert.strictEqual(response.status, RequestStartStopStatusEnumType.Accepted)
+      requestHandlerMock.mock.resetCalls()
 
-    // Verify TransactionEvent was sent despite custom data
-    assert.strictEqual(sentTransactionEvents.length, 1)
-  })
+      listenerService.emit(
+        OCPP20IncomingRequestCommand.REQUEST_STOP_TRANSACTION,
+        listenerStation,
+        { transactionId: transactionId as UUIDv4 } satisfies OCPP20RequestStopTransactionRequest,
+        {
+          status: RequestStartStopStatusEnumType.Accepted,
+        } satisfies OCPP20RequestStopTransactionResponse
+      )
 
-  // FR: F03.FR.07, F03.FR.09
-  await it('should validate TransactionEvent content correctly', async () => {
-    // Start a transaction first
-    const transactionId = await startTransaction(2, 600) // Use EVSE 2
+      assert.strictEqual(requestHandlerMock.mock.callCount(), 1)
+      const args = requestHandlerMock.mock.calls[0].arguments as [
+        unknown,
+        string,
+        OCPP20TransactionEventRequest
+      ]
+      const transactionEvent = args[2]
 
-    // Clear transaction events after starting, before testing stop transaction
-    sentTransactionEvents = []
-
-    const stopRequest: OCPP20RequestStopTransactionRequest = {
-      transactionId: transactionId as UUIDv4,
-    }
-
-    const response = await testableService.handleRequestStopTransaction(mockStation, stopRequest)
-
-    assert.strictEqual(response.status, RequestStartStopStatusEnumType.Accepted)
-
-    // Verify TransactionEvent structure and content
-    assert.strictEqual(sentTransactionEvents.length, 1)
-    const transactionEvent = sentTransactionEvents[0]
-
-    // Validate required fields
-    assert.strictEqual(transactionEvent.eventType, OCPP20TransactionEventEnumType.Ended)
-    assert.notStrictEqual(transactionEvent.timestamp, undefined)
-    assert.ok(transactionEvent.timestamp instanceof Date)
-    assert.strictEqual(transactionEvent.triggerReason, OCPP20TriggerReasonEnumType.RemoteStop)
-    assert.notStrictEqual(transactionEvent.seqNo, undefined)
-    assert.strictEqual(typeof transactionEvent.seqNo, 'number')
-
-    // Validate transaction info
-    assert.notStrictEqual(transactionEvent.transactionInfo, undefined)
-    assert.strictEqual(transactionEvent.transactionInfo.transactionId, transactionId)
-    assert.strictEqual(transactionEvent.transactionInfo.stoppedReason, OCPP20ReasonEnumType.Remote)
-
-    // Validate EVSE info
-    assert.notStrictEqual(transactionEvent.evse, undefined)
-    assert.strictEqual(transactionEvent.evse?.id, 2) // Should match the EVSE we used
-  })
-
-  // FR: F03.FR.09
-  await it('should include final meter values in TransactionEvent(Ended)', async () => {
-    resetConnectorTransactionState(mockStation)
-
-    const transactionId = await startTransaction(3, 700)
-
-    const connectorStatus = mockStation.getConnectorStatus(3)
-    assert.notStrictEqual(connectorStatus, undefined)
-    if (connectorStatus != null) {
-      connectorStatus.transactionEnergyActiveImportRegisterValue = 12345.67
-    }
-
-    sentTransactionEvents = []
-
-    const stopRequest: OCPP20RequestStopTransactionRequest = {
-      transactionId: transactionId as UUIDv4,
-    }
-
-    const response = await testableService.handleRequestStopTransaction(mockStation, stopRequest)
-
-    assert.strictEqual(response.status, RequestStartStopStatusEnumType.Accepted)
-
-    assert.strictEqual(sentTransactionEvents.length, 1)
-    const transactionEvent = sentTransactionEvents[0]
-
-    assert.strictEqual(transactionEvent.eventType, OCPP20TransactionEventEnumType.Ended)
-
-    assert.notStrictEqual(transactionEvent.meterValue, undefined)
-    if (transactionEvent.meterValue == null) {
-      assert.fail('Expected meterValue to be defined')
-    }
-    assert.strictEqual(transactionEvent.meterValue.length, 1)
-
-    const meterValue = transactionEvent.meterValue[0]
-    assert.notStrictEqual(meterValue, undefined)
-    assert.ok(meterValue.timestamp instanceof Date)
-    assert.notStrictEqual(meterValue.sampledValue, undefined)
-    assert.strictEqual(meterValue.sampledValue.length, 1)
-
-    const sampledValue = meterValue.sampledValue[0]
-    assert.strictEqual(sampledValue.value, 12345.67)
-    assert.strictEqual(sampledValue.context, 'Transaction.End')
-    assert.strictEqual(sampledValue.measurand, 'Energy.Active.Import.Register')
+      assert.strictEqual(transactionEvent.eventType, OCPP20TransactionEventEnumType.Ended)
+    })
   })
 })

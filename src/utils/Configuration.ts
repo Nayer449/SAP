@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path'
 import { env } from 'node:process'
 import { fileURLToPath } from 'node:url'
 
+import { BaseError } from '../exception/index.js'
 import {
   ApplicationProtocol,
   ApplicationProtocolVersion,
@@ -19,22 +20,31 @@ import {
   type WorkerConfiguration,
 } from '../types/index.js'
 import {
-  checkWorkerProcessType,
-  DEFAULT_ELEMENT_ADD_DELAY,
+  DEFAULT_ELEMENT_ADD_DELAY_MS,
   DEFAULT_POOL_MAX_SIZE,
   DEFAULT_POOL_MIN_SIZE,
-  DEFAULT_WORKER_START_DELAY,
+  DEFAULT_WORKER_START_DELAY_MS,
   WorkerProcessType,
 } from '../worker/index.js'
+import { CURRENT_CONFIGURATION_SCHEMA_VERSION } from './ConfigurationMigrations.js'
 import {
   buildPerformanceUriFilePath,
-  checkWorkerElementsPerWorker,
+  configurationLogPrefix,
   getDefaultPerformanceStorageUri,
-  logPrefix,
 } from './ConfigurationUtils.js'
+import { ConfigurationValidationError, validateConfiguration } from './ConfigurationValidation.js'
 import { Constants } from './Constants.js'
-import { handleFileException } from './ErrorUtils.js'
-import { has, isCFEnvironment, mergeDeepRight, once } from './Utils.js'
+import { ensureError, handleFileException } from './ErrorUtils.js'
+import { logger } from './Logger.js'
+import {
+  clone,
+  convertToInt,
+  has,
+  isCFEnvironment,
+  isNotEmptyString,
+  mergeDeepRight,
+  once,
+} from './Utils.js'
 
 type ConfigurationSectionType =
   | LogConfiguration
@@ -43,6 +53,13 @@ type ConfigurationSectionType =
   | WorkerConfiguration
 
 const defaultUIServerConfiguration: UIServerConfiguration = {
+  accessPolicy: {
+    allowedHosts: [],
+    allowedOrigins: [],
+    allowLoopbackProxy: false,
+    requireTlsForNonLoopback: true,
+    trustedProxies: [],
+  },
   enabled: false,
   options: {
     host: Constants.DEFAULT_UI_SERVER_HOST,
@@ -64,17 +81,21 @@ const defaultLogConfiguration: LogConfiguration = {
   format: 'simple',
   level: 'info',
   rotate: true,
-  statisticsInterval: Constants.DEFAULT_LOG_STATISTICS_INTERVAL,
+  statisticsInterval: Constants.DEFAULT_LOG_STATISTICS_INTERVAL_SECONDS,
 }
 
 const defaultWorkerConfiguration: WorkerConfiguration = {
-  elementAddDelay: DEFAULT_ELEMENT_ADD_DELAY,
+  elementAddDelay: DEFAULT_ELEMENT_ADD_DELAY_MS,
   elementsPerWorker: 'auto',
   poolMaxSize: DEFAULT_POOL_MAX_SIZE,
   poolMinSize: DEFAULT_POOL_MIN_SIZE,
   processType: WorkerProcessType.workerSet,
-  startDelay: DEFAULT_WORKER_START_DELAY,
+  startDelay: DEFAULT_WORKER_START_DELAY_MS,
 }
+
+const defaultPersistState = true
+
+export const DEFAULT_PERSIST_STATE = defaultPersistState
 
 // eslint-disable-next-line @typescript-eslint/no-extraneous-class
 export class Configuration {
@@ -83,6 +104,7 @@ export class Configuration {
   private static configurationData?: ConfigurationData
   private static configurationFile: string | undefined
   private static configurationFileReloading = false
+  private static configurationFileReloadPending = false
   private static configurationFileWatcher?: FSWatcher
   private static configurationSectionCache: Map<ConfigurationSection, ConfigurationSectionType>
 
@@ -92,11 +114,12 @@ export class Configuration {
       Configuration.configurationFile = configurationFile
     } else {
       console.error(
-        `${chalk.green(logPrefix())} ${chalk.red(
+        `${chalk.green(configurationLogPrefix())} ${chalk.red(
           "Configuration file './src/assets/config.json' not found, using default configuration"
         )}`
       )
       Configuration.configurationData = {
+        $schemaVersion: CURRENT_CONFIGURATION_SCHEMA_VERSION,
         log: defaultLogConfiguration,
         performanceStorage: defaultStorageConfiguration,
         stationTemplateUrls: [
@@ -129,20 +152,34 @@ export class Configuration {
   public static getConfigurationData (): ConfigurationData | undefined {
     if (
       Configuration.configurationData == null &&
-      Configuration.configurationFile != null &&
-      Configuration.configurationFile.trim().length > 0
+      isNotEmptyString(Configuration.configurationFile)
     ) {
       try {
-        Configuration.configurationData = JSON.parse(
-          readFileSync(Configuration.configurationFile, 'utf8')
-        ) as ConfigurationData
+        const parsed: unknown = JSON.parse(readFileSync(Configuration.configurationFile, 'utf8'))
+        try {
+          Configuration.configurationData = validateConfiguration(
+            parsed,
+            Configuration.configurationFile
+          )
+        } catch (validationError) {
+          if (
+            validationError instanceof ConfigurationValidationError ||
+            validationError instanceof BaseError
+          ) {
+            console.error(
+              `${chalk.green(configurationLogPrefix())} ${chalk.red(validationError.message)}`
+            )
+            process.exit(1)
+          }
+          throw validationError
+        }
         Configuration.configurationFileWatcher ??= Configuration.getConfigurationFileWatcher()
       } catch (error) {
         handleFileException(
           Configuration.configurationFile,
           FileType.Configuration,
-          error as NodeJS.ErrnoException,
-          logPrefix(),
+          ensureError(error),
+          configurationLogPrefix(),
           { consoleOut: true }
         )
       }
@@ -160,11 +197,11 @@ export class Configuration {
     return Configuration.configurationSectionCache.get(sectionName) as T
   }
 
+  public static getPersistState (): boolean {
+    return Configuration.getConfigurationData()?.persistState ?? defaultPersistState
+  }
+
   public static getStationTemplateUrls (): StationTemplateUrl[] | undefined {
-    const checkDeprecatedConfigurationKeysOnce = once(
-      Configuration.checkDeprecatedConfigurationKeys.bind(Configuration)
-    )
-    checkDeprecatedConfigurationKeysOnce()
     return Configuration.getConfigurationData()?.stationTemplateUrls
   }
 
@@ -175,14 +212,6 @@ export class Configuration {
   }
 
   public static getSupervisionUrls (): string | string[] | undefined {
-    if (
-      Configuration.getConfigurationData()?.['supervisionURLs' as keyof ConfigurationData] != null
-    ) {
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      Configuration.getConfigurationData()!.supervisionUrls = Configuration.getConfigurationData()![
-        'supervisionURLs' as keyof ConfigurationData
-      ] as string | string[]
-    }
     return Configuration.getConfigurationData()?.supervisionUrls
   }
 
@@ -194,41 +223,21 @@ export class Configuration {
   }
 
   public static workerPoolInUse (): boolean {
-    return [WorkerProcessType.dynamicPool, WorkerProcessType.fixedPool].includes(
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      Configuration.getConfigurationSection<WorkerConfiguration>(ConfigurationSection.worker)
-        .processType!
+    const processType = Configuration.getConfigurationSection<WorkerConfiguration>(
+      ConfigurationSection.worker
+    ).processType
+    return (
+      processType != null &&
+      [WorkerProcessType.dynamicPool, WorkerProcessType.fixedPool].includes(processType)
     )
   }
 
   private static buildLogSection (): LogConfiguration {
-    const configData = Configuration.getConfigurationData()
-    const deprecatedLogKeyMap: [string, string][] = [
-      ['logEnabled', 'enabled'],
-      ['logFile', 'file'],
-      ['logErrorFile', 'errorFile'],
-      ['logStatisticsInterval', 'statisticsInterval'],
-      ['logLevel', 'level'],
-      ['logConsole', 'console'],
-      ['logFormat', 'format'],
-      ['logRotate', 'rotate'],
-      ['logMaxFiles', 'maxFiles'],
-      ['logMaxSize', 'maxSize'],
-    ]
-    const deprecatedLogConfiguration: Record<string, unknown> = {}
-    for (const [deprecatedKey, newKey] of deprecatedLogKeyMap) {
-      if (has(deprecatedKey, configData)) {
-        deprecatedLogConfiguration[newKey] = (configData as unknown as Record<string, unknown>)[
-          deprecatedKey
-        ]
-      }
-    }
-    const logConfiguration: LogConfiguration = {
+    const configurationData = Configuration.getConfigurationData()
+    return {
       ...defaultLogConfiguration,
-      ...(deprecatedLogConfiguration as Partial<LogConfiguration>),
-      ...(has(ConfigurationSection.log, configData) && configData?.log),
+      ...(has(ConfigurationSection.log, configurationData) && configurationData?.log),
     }
-    return logConfiguration
   }
 
   private static buildPerformanceStorageSection (): StorageConfiguration {
@@ -262,8 +271,7 @@ export class Configuration {
           Configuration.getConfigurationData()?.performanceStorage?.type === StorageType.SQLITE) &&
           Configuration.getConfigurationData()?.performanceStorage?.uri != null && {
           uri: buildPerformanceUriFilePath(
-            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-            new URL(Configuration.getConfigurationData()!.performanceStorage!.uri!).pathname
+            new URL(Configuration.getConfigurationData()?.performanceStorage?.uri ?? '').pathname
           ),
         }),
       }
@@ -272,56 +280,28 @@ export class Configuration {
   }
 
   private static buildUIServerSection (): UIServerConfiguration {
-    let uiServerConfiguration: UIServerConfiguration = defaultUIServerConfiguration
+    let uiServerConfiguration: UIServerConfiguration = clone(defaultUIServerConfiguration)
     if (has(ConfigurationSection.uiServer, Configuration.getConfigurationData())) {
-      uiServerConfiguration = mergeDeepRight<UIServerConfiguration, Partial<UIServerConfiguration>>(
+      uiServerConfiguration = mergeDeepRight(
         uiServerConfiguration,
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        Configuration.getConfigurationData()!.uiServer!
+        Configuration.getConfigurationData()?.uiServer ?? defaultUIServerConfiguration
       )
     }
     if (isCFEnvironment()) {
       delete uiServerConfiguration.options?.host
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      uiServerConfiguration.options!.port = Number.parseInt(env.PORT!)
+      if (uiServerConfiguration.options != null) {
+        uiServerConfiguration.options.port = convertToInt(env.PORT ?? '')
+      }
     }
     return uiServerConfiguration
   }
 
   private static buildWorkerSection (): WorkerConfiguration {
-    const configData = Configuration.getConfigurationData()
-    const deprecatedWorkerKeyMap: [string, string][] = [
-      ['workerProcess', 'processType'],
-      ['workerStartDelay', 'startDelay'],
-      ['chargingStationsPerWorker', 'elementsPerWorker'],
-      ['elementAddDelay', 'elementAddDelay'],
-      ['workerPoolMinSize', 'poolMinSize'],
-      ['workerPoolMaxSize', 'poolMaxSize'],
-    ]
-    const deprecatedWorkerConfiguration: Record<string, unknown> = {}
-    for (const [deprecatedKey, newKey] of deprecatedWorkerKeyMap) {
-      if (has(deprecatedKey, configData)) {
-        deprecatedWorkerConfiguration[newKey] = (configData as unknown as Record<string, unknown>)[
-          deprecatedKey
-        ]
-      }
-    }
-    if (has('elementStartDelay', configData?.worker)) {
-      deprecatedWorkerConfiguration.elementAddDelay = (
-        configData?.worker as unknown as Record<string, unknown>
-      ).elementStartDelay
-    }
-    has('workerPoolStrategy', configData) &&
-      delete (configData as unknown as Record<string, unknown>).workerPoolStrategy
-    const workerConfiguration: WorkerConfiguration = {
+    const configurationData = Configuration.getConfigurationData()
+    return {
       ...defaultWorkerConfiguration,
-      ...(deprecatedWorkerConfiguration as Partial<WorkerConfiguration>),
-      ...(has(ConfigurationSection.worker, configData) && configData?.worker),
+      ...(has(ConfigurationSection.worker, configurationData) && configurationData?.worker),
     }
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    checkWorkerProcessType(workerConfiguration.processType!)
-    checkWorkerElementsPerWorker(workerConfiguration.elementsPerWorker)
-    return workerConfiguration
   }
 
   private static cacheConfigurationSection (sectionName: ConfigurationSection): void {
@@ -350,218 +330,43 @@ export class Configuration {
     }
   }
 
-  private static checkDeprecatedConfigurationKeys (): void {
-    const deprecatedKeys: [string, ConfigurationSection | undefined, string][] = [
-      // connection timeout
-      [
-        'autoReconnectTimeout',
-        undefined,
-        "Use 'ConnectionTimeOut' OCPP parameter in charging station template instead",
-      ],
-      [
-        'connectionTimeout',
-        undefined,
-        "Use 'ConnectionTimeOut' OCPP parameter in charging station template instead",
-      ],
-      // connection retries
-      ['autoReconnectMaxRetries', undefined, 'Use it in charging station template instead'],
-      // station template url(s)
-      ['stationTemplateURLs', undefined, "Use 'stationTemplateUrls' instead"],
-      // supervision url(s)
-      ['supervisionURLs', undefined, "Use 'supervisionUrls' instead"],
-      // supervision urls distribution
-      ['distributeStationToTenantEqually', undefined, "Use 'supervisionUrlDistribution' instead"],
-      ['distributeStationsToTenantsEqually', undefined, "Use 'supervisionUrlDistribution' instead"],
-      // worker section
-      [
-        'useWorkerPool',
-        undefined,
-        `Use '${ConfigurationSection.worker}' section to define the type of worker process model instead`,
-      ],
-      [
-        'workerProcess',
-        undefined,
-        `Use '${ConfigurationSection.worker}' section to define the type of worker process model instead`,
-      ],
-      [
-        'workerStartDelay',
-        undefined,
-        `Use '${ConfigurationSection.worker}' section to define the worker start delay instead`,
-      ],
-      [
-        'chargingStationsPerWorker',
-        undefined,
-        `Use '${ConfigurationSection.worker}' section to define the number of element(s) per worker instead`,
-      ],
-      [
-        'elementAddDelay',
-        undefined,
-        `Use '${ConfigurationSection.worker}' section to define the worker's element add delay instead`,
-      ],
-      [
-        'workerPoolMinSize',
-        undefined,
-        `Use '${ConfigurationSection.worker}' section to define the worker pool minimum size instead`,
-      ],
-      [
-        'workerPoolSize',
-        undefined,
-        `Use '${ConfigurationSection.worker}' section to define the worker pool maximum size instead`,
-      ],
-      [
-        'workerPoolMaxSize',
-        undefined,
-        `Use '${ConfigurationSection.worker}' section to define the worker pool maximum size instead`,
-      ],
-      [
-        'workerPoolStrategy',
-        undefined,
-        `Use '${ConfigurationSection.worker}' section to define the worker pool strategy instead`,
-      ],
-      ['poolStrategy', ConfigurationSection.worker, 'Not publicly exposed to end users'],
-      ['elementStartDelay', ConfigurationSection.worker, "Use 'elementAddDelay' instead"],
-      // log section
-      [
-        'logEnabled',
-        undefined,
-        `Use '${ConfigurationSection.log}' section to define the logging enablement instead`,
-      ],
-      [
-        'logFile',
-        undefined,
-        `Use '${ConfigurationSection.log}' section to define the log file instead`,
-      ],
-      [
-        'logErrorFile',
-        undefined,
-        `Use '${ConfigurationSection.log}' section to define the log error file instead`,
-      ],
-      [
-        'logConsole',
-        undefined,
-        `Use '${ConfigurationSection.log}' section to define the console logging enablement instead`,
-      ],
-      [
-        'logStatisticsInterval',
-        undefined,
-        `Use '${ConfigurationSection.log}' section to define the log statistics interval instead`,
-      ],
-      [
-        'logLevel',
-        undefined,
-        `Use '${ConfigurationSection.log}' section to define the log level instead`,
-      ],
-      [
-        'logFormat',
-        undefined,
-        `Use '${ConfigurationSection.log}' section to define the log format instead`,
-      ],
-      [
-        'logRotate',
-        undefined,
-        `Use '${ConfigurationSection.log}' section to define the log rotation enablement instead`,
-      ],
-      [
-        'logMaxFiles',
-        undefined,
-        `Use '${ConfigurationSection.log}' section to define the log maximum files instead`,
-      ],
-      [
-        'logMaxSize',
-        undefined,
-        `Use '${ConfigurationSection.log}' section to define the log maximum size instead`,
-      ],
-      // performanceStorage section
-      ['URI', ConfigurationSection.performanceStorage, "Use 'uri' instead"],
-    ]
-    for (const [key, section, msg] of deprecatedKeys) {
-      Configuration.warnDeprecatedConfigurationKey(key, section, msg)
-    }
-    // station template url(s) remapping
-    Configuration.getConfigurationData()?.['stationTemplateURLs' as keyof ConfigurationData] !=
-      null &&
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      (Configuration.getConfigurationData()!.stationTemplateUrls =
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        Configuration.getConfigurationData()![
-          'stationTemplateURLs' as keyof ConfigurationData
-        ] as StationTemplateUrl[])
-    Configuration.getConfigurationData()?.stationTemplateUrls.forEach(
-      (stationTemplateUrl: StationTemplateUrl) => {
-        if (stationTemplateUrl['numberOfStation' as keyof StationTemplateUrl] != null) {
-          console.error(
-            `${chalk.green(logPrefix())} ${chalk.red(
-              `Deprecated configuration key 'numberOfStation' usage for template file '${stationTemplateUrl.file}' in 'stationTemplateUrls'. Use 'numberOfStations' instead`
-            )}`
-          )
-        }
-      }
-    )
-    // worker section: staticPool check
-    if (
-      Configuration.getConfigurationData()?.worker?.processType ===
-      ('staticPool' as WorkerProcessType)
-    ) {
-      console.error(
-        `${chalk.green(logPrefix())} ${chalk.red(
-          `Deprecated configuration 'staticPool' value usage in worker section 'processType' field. Use '${WorkerProcessType.fixedPool}' value instead`
-        )}`
-      )
-    }
-    // uiServer section
-    if (has('uiWebSocketServer', Configuration.getConfigurationData())) {
-      console.error(
-        `${chalk.green(logPrefix())} ${chalk.red(
-          `Deprecated configuration section 'uiWebSocketServer' usage. Use '${ConfigurationSection.uiServer}' instead`
-        )}`
-      )
-    }
-  }
-
   private static getConfigurationFileWatcher (): FSWatcher | undefined {
-    if (
-      Configuration.configurationFile == null ||
-      Configuration.configurationFile.trim().length === 0
-    ) {
+    if (!isNotEmptyString(Configuration.configurationFile)) {
       return
     }
     try {
       return watch(Configuration.configurationFile, (event, filename): void => {
-        if (
-          !Configuration.configurationFileReloading &&
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          filename!.trim().length > 0 &&
-          event === 'change'
-        ) {
-          Configuration.configurationFileReloading = true
-          const consoleWarnOnce = once(console.warn)
-          consoleWarnOnce(
-            `${chalk.green(logPrefix())} ${chalk.yellow(
-              // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
-              `${FileType.Configuration} ${Configuration.configurationFile} file has changed, reload`
-            )}`
-          )
-          delete Configuration.configurationData
-          Configuration.configurationSectionCache.clear()
-          if (Configuration.configurationChangeCallback != null) {
-            Configuration.configurationChangeCallback()
-              .finally(() => {
-                Configuration.configurationFileReloading = false
-              })
-              .catch((error: unknown) => {
-                throw typeof error === 'string' ? new Error(error) : error
-              })
-          } else {
-            Configuration.configurationFileReloading = false
-          }
+        if ((filename?.trim().length ?? 0) === 0 || event !== 'change') {
+          return
         }
+        if (Configuration.configurationFileReloading) {
+          // Coalesce events arriving during an in-flight reload into a single
+          // follow-up reload. N rapid edits collapse into ≤2 reloads
+          // (current + one drained), preserving the latest file content.
+          Configuration.configurationFileReloadPending = true
+          return
+        }
+        Configuration.configurationFileReloading = true
+        const consoleWarnOnce = once(console.warn)
+        consoleWarnOnce(
+          `${chalk.green(configurationLogPrefix())} ${chalk.yellow(
+            // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+            `${FileType.Configuration} ${Configuration.configurationFile} file has changed, reload`
+          )}`
+        )
+        Configuration.runReloadLoop().catch((error: unknown) => {
+          logger.error(
+            `${configurationLogPrefix()} Configuration reload loop error:`,
+            ensureError(error)
+          )
+        })
       })
     } catch (error) {
       handleFileException(
         Configuration.configurationFile,
         FileType.Configuration,
-        error as NodeJS.ErrnoException,
-        logPrefix(),
+        ensureError(error),
+        configurationLogPrefix(),
         { consoleOut: true }
       )
     }
@@ -571,36 +376,73 @@ export class Configuration {
     return Configuration.configurationSectionCache.has(sectionName)
   }
 
-  private static warnDeprecatedConfigurationKey (
-    key: string,
-    configurationSection?: ConfigurationSection,
-    logMsgToAppend = ''
-  ): void {
-    if (
-      configurationSection != null &&
-      Configuration.getConfigurationData()?.[configurationSection as keyof ConfigurationData] !=
-        null &&
-      (
-        Configuration.getConfigurationData()?.[
-          configurationSection as keyof ConfigurationData
-        ] as Record<string, unknown>
-      )[key] != null
-    ) {
-      console.error(
-        `${chalk.green(logPrefix())} ${chalk.red(
-          `Deprecated configuration key '${key}' usage in section '${configurationSection}'${
-            logMsgToAppend.trim().length > 0 ? `. ${logMsgToAppend}` : ''
-          }`
-        )}`
-      )
-    } else if (Configuration.getConfigurationData()?.[key as keyof ConfigurationData] != null) {
-      console.error(
-        `${chalk.green(logPrefix())} ${chalk.red(
-          `Deprecated configuration key '${key}' usage${
-            logMsgToAppend.trim().length > 0 ? `. ${logMsgToAppend}` : ''
-          }`
-        )}`
-      )
+  /**
+   * Reload the configuration file. On parse or validation failure, restores
+   * the pre-reload `configurationData` and section cache snapshot. Callback
+   * failures are logged via `logger.error` but do not trigger rollback —
+   * the new configuration is already valid; subscriber side-effects are
+   * recoverable on the next reload cycle.
+   */
+  private static async performReload (): Promise<void> {
+    const previousData =
+      Configuration.configurationData != null
+        ? structuredClone(Configuration.configurationData)
+        : undefined
+    const previousCache = new Map(Configuration.configurationSectionCache)
+    let reloadSucceeded = false
+    try {
+      delete Configuration.configurationData
+      Configuration.configurationSectionCache.clear()
+      if (isNotEmptyString(Configuration.configurationFile)) {
+        const parsed: unknown = JSON.parse(readFileSync(Configuration.configurationFile, 'utf8'))
+        Configuration.configurationData = validateConfiguration(
+          parsed,
+          Configuration.configurationFile
+        )
+      }
+      reloadSucceeded = true
+      if (Configuration.configurationChangeCallback != null) {
+        try {
+          await Configuration.configurationChangeCallback()
+        } catch (callbackError) {
+          logger.error(
+            `${configurationLogPrefix()} Configuration change callback error:`,
+            ensureError(callbackError)
+          )
+        }
+      }
+    } catch (error) {
+      if (error instanceof ConfigurationValidationError || error instanceof BaseError) {
+        logger.error(
+          `${configurationLogPrefix()} Configuration hot-reload failed; rolling back to previous configuration:`,
+          error
+        )
+      } else {
+        logger.error(
+          `${configurationLogPrefix()} Configuration hot-reload failed with unexpected error; rolling back:`,
+          ensureError(error)
+        )
+      }
+      if (!reloadSucceeded) {
+        Configuration.configurationData = previousData
+        Configuration.configurationSectionCache = previousCache
+      }
+    }
+  }
+
+  /**
+   * Drive `performReload` until no `configurationFileReloadPending` event
+   * remains. Releases the reloading lock in `finally`.
+   */
+  private static async runReloadLoop (): Promise<void> {
+    try {
+      do {
+        Configuration.configurationFileReloadPending = false
+        await Configuration.performReload()
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- mutated by fs.watch handler during performReload
+      } while (Configuration.configurationFileReloadPending)
+    } finally {
+      Configuration.configurationFileReloading = false
     }
   }
 }

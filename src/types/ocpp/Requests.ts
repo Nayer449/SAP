@@ -21,9 +21,16 @@ import {
   type OCPP16ReserveNowRequest,
   type OCPP16StatusNotificationRequest,
 } from './1.6/Requests.js'
-import { OperationalStatusEnumType } from './2.0/Common.js'
+import {
+  MessageTriggerEnumType,
+  OCPP20FirmwareStatusEnumType,
+  OCPP20OperationalStatusEnumType,
+} from './2.0/Common.js'
 import {
   type OCPP20BootNotificationRequest,
+  type OCPP20DataTransferRequest,
+  type OCPP20FirmwareStatusNotificationRequest,
+  type OCPP20HeartbeatRequest,
   OCPP20IncomingRequestCommand,
   OCPP20RequestCommand,
   type OCPP20StatusNotificationRequest,
@@ -38,15 +45,18 @@ export type CachedRequest = [
   JsonType
 ]
 
-export type DataTransferRequest = OCPP16DataTransferRequest
+export type DataTransferRequest = OCPP16DataTransferRequest | OCPP20DataTransferRequest
 
 export type DiagnosticsStatusNotificationRequest = OCPP16DiagnosticsStatusNotificationRequest
 
 export type ErrorCallback = (ocppError: OCPPError, requestStatistic?: boolean) => void
 
-export type FirmwareStatusNotificationRequest = OCPP16FirmwareStatusNotificationRequest
+export type FirmwareStatusNotificationRequest =
+  | OCPP16FirmwareStatusNotificationRequest
+  | OCPP20FirmwareStatusNotificationRequest
 
-export type HeartbeatRequest = OCPP16HeartbeatRequest
+// eslint-disable-next-line @typescript-eslint/no-duplicate-type-constituents
+export type HeartbeatRequest = OCPP16HeartbeatRequest | OCPP20HeartbeatRequest
 
 export type IncomingRequest = [MessageType.CALL_MESSAGE, string, IncomingRequestCommand, JsonType]
 
@@ -72,6 +82,7 @@ export const RequestCommand = {
 export type RequestCommand = OCPP16RequestCommand | OCPP20RequestCommand
 
 export interface RequestParams {
+  rawPayload?: boolean
   skipBufferingOnError?: boolean
   throwError?: boolean
   triggerMessage?: boolean
@@ -79,9 +90,10 @@ export interface RequestParams {
 
 export const MessageTrigger = {
   ...OCPP16MessageTrigger,
+  ...MessageTriggerEnumType,
 } as const
 // eslint-disable-next-line @typescript-eslint/no-redeclare
-export type MessageTrigger = OCPP16MessageTrigger
+export type MessageTrigger = MessageTriggerEnumType | OCPP16MessageTrigger
 
 export type MeterValuesRequest = OCPP16MeterValuesRequest | OCPP20MeterValuesRequest
 
@@ -93,10 +105,10 @@ export type StatusNotificationRequest =
 
 export const AvailabilityType = {
   ...OCPP16AvailabilityType,
-  ...OperationalStatusEnumType,
+  ...OCPP20OperationalStatusEnumType,
 } as const
 // eslint-disable-next-line @typescript-eslint/no-redeclare
-export type AvailabilityType = OCPP16AvailabilityType | OperationalStatusEnumType
+export type AvailabilityType = OCPP16AvailabilityType | OCPP20OperationalStatusEnumType
 
 export type CancelReservationRequest = OCPP16CancelReservationRequest
 
@@ -108,9 +120,10 @@ export type DiagnosticsStatus = OCPP16DiagnosticsStatus
 
 export const FirmwareStatus = {
   ...OCPP16FirmwareStatus,
+  ...OCPP20FirmwareStatusEnumType,
 } as const
 // eslint-disable-next-line @typescript-eslint/no-redeclare
-export type FirmwareStatus = OCPP16FirmwareStatus
+export type FirmwareStatus = OCPP16FirmwareStatus | OCPP20FirmwareStatusEnumType
 
 export type ReserveNowRequest = OCPP16ReserveNowRequest
 

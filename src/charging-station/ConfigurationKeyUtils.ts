@@ -1,7 +1,151 @@
-import type { ConfigurationKey, ConfigurationKeyType } from '../types/index.js'
 import type { ChargingStation } from './ChargingStation.js'
 
+import {
+  type ConfigurationKey,
+  type ConfigurationKeyType,
+  OCPP20ComponentName,
+  OCPPVersion,
+  StandardParametersKey,
+  VendorParametersKey,
+} from '../types/index.js'
 import { logger } from '../utils/index.js'
+
+export const buildConfigKey = (component: string, variable: string, instance?: string): string => {
+  const base = `${component}.${variable}`
+  return instance != null ? `${base}.${instance}` : base
+}
+
+const OCPP2_PARAMETER_KEY_MAP = new Map<ConfigurationKeyType, ConfigurationKeyType>([
+  [
+    StandardParametersKey.AuthorizeRemoteTxRequests,
+    buildConfigKey(OCPP20ComponentName.AuthCtrlr, StandardParametersKey.AuthorizeRemoteStart),
+  ],
+  [
+    StandardParametersKey.ClockAlignedDataInterval,
+    buildConfigKey(OCPP20ComponentName.AlignedDataCtrlr, StandardParametersKey.AlignedDataInterval),
+  ],
+  [
+    StandardParametersKey.ConnectionTimeOut,
+    buildConfigKey(OCPP20ComponentName.TxCtrlr, StandardParametersKey.EVConnectionTimeOut),
+  ],
+  [
+    StandardParametersKey.HeartbeatInterval,
+    buildConfigKey(OCPP20ComponentName.OCPPCommCtrlr, StandardParametersKey.HeartbeatInterval),
+  ],
+  [
+    StandardParametersKey.HeartBeatInterval,
+    buildConfigKey(OCPP20ComponentName.OCPPCommCtrlr, StandardParametersKey.HeartbeatInterval),
+  ],
+  [
+    StandardParametersKey.LocalAuthListEnabled,
+    buildConfigKey(OCPP20ComponentName.LocalAuthListCtrlr, StandardParametersKey.Enabled),
+  ],
+  [
+    StandardParametersKey.LocalAuthorizeOffline,
+    buildConfigKey(OCPP20ComponentName.AuthCtrlr, StandardParametersKey.LocalAuthorizationOffline),
+  ],
+  [
+    StandardParametersKey.LocalPreAuthorize,
+    buildConfigKey(OCPP20ComponentName.AuthCtrlr, StandardParametersKey.LocalPreAuthorization),
+  ],
+  [
+    StandardParametersKey.MeterValuesAlignedData,
+    buildConfigKey(OCPP20ComponentName.AlignedDataCtrlr, StandardParametersKey.Measurands),
+  ],
+  [
+    StandardParametersKey.MeterValueSampleInterval,
+    buildConfigKey(OCPP20ComponentName.SampledDataCtrlr, StandardParametersKey.TxUpdatedInterval),
+  ],
+  [
+    StandardParametersKey.MeterValuesSampledData,
+    buildConfigKey(OCPP20ComponentName.SampledDataCtrlr, StandardParametersKey.TxUpdatedMeasurands),
+  ],
+  [
+    StandardParametersKey.ReserveConnectorZeroSupported,
+    buildConfigKey(OCPP20ComponentName.ReservationCtrlr, StandardParametersKey.NonEvseSpecific),
+  ],
+  [
+    StandardParametersKey.StopTxnAlignedData,
+    buildConfigKey(OCPP20ComponentName.AlignedDataCtrlr, StandardParametersKey.TxEndedMeasurands),
+  ],
+  [
+    StandardParametersKey.StopTxnSampledData,
+    buildConfigKey(OCPP20ComponentName.SampledDataCtrlr, StandardParametersKey.TxEndedMeasurands),
+  ],
+  [
+    StandardParametersKey.WebSocketPingInterval,
+    buildConfigKey(OCPP20ComponentName.OCPPCommCtrlr, StandardParametersKey.WebSocketPingInterval),
+  ],
+  [
+    VendorParametersKey.AlignedDataSignReadings,
+    buildConfigKey(OCPP20ComponentName.AlignedDataCtrlr, StandardParametersKey.SignReadings),
+  ],
+  [
+    VendorParametersKey.AlignedDataSignUpdatedReadings,
+    buildConfigKey(OCPP20ComponentName.AlignedDataCtrlr, VendorParametersKey.SignUpdatedReadings),
+  ],
+  [
+    VendorParametersKey.MeterPublicKey,
+    buildConfigKey(OCPP20ComponentName.FiscalMetering, VendorParametersKey.PublicKey),
+  ],
+  [
+    VendorParametersKey.PublicKeyWithSignedMeterValue,
+    buildConfigKey(
+      OCPP20ComponentName.OCPPCommCtrlr,
+      StandardParametersKey.PublicKeyWithSignedMeterValue
+    ),
+  ],
+  [
+    VendorParametersKey.SampledDataSignReadings,
+    buildConfigKey(OCPP20ComponentName.SampledDataCtrlr, StandardParametersKey.SignReadings),
+  ],
+  [
+    VendorParametersKey.SampledDataSignStartedReadings,
+    buildConfigKey(OCPP20ComponentName.SampledDataCtrlr, VendorParametersKey.SignStartedReadings),
+  ],
+  [
+    VendorParametersKey.SampledDataSignUpdatedReadings,
+    buildConfigKey(OCPP20ComponentName.SampledDataCtrlr, VendorParametersKey.SignUpdatedReadings),
+  ],
+  [
+    VendorParametersKey.SigningMethod,
+    buildConfigKey(OCPP20ComponentName.FiscalMetering, VendorParametersKey.SigningMethod),
+  ],
+  [
+    VendorParametersKey.StartTxnSampledData,
+    buildConfigKey(OCPP20ComponentName.SampledDataCtrlr, StandardParametersKey.TxStartedMeasurands),
+  ],
+])
+
+const resolveKey = (
+  chargingStation: ChargingStation,
+  key: ConfigurationKeyType
+): ConfigurationKeyType => {
+  const version = chargingStation.stationInfo?.ocppVersion
+  if (version === OCPPVersion.VERSION_20 || version === OCPPVersion.VERSION_201) {
+    return OCPP2_PARAMETER_KEY_MAP.get(key) ?? key
+  }
+  return key
+}
+
+export const warnOnOCPP16TemplateKeys = (chargingStation: ChargingStation): void => {
+  const version = chargingStation.stationInfo?.ocppVersion
+  if (version !== OCPPVersion.VERSION_20 && version !== OCPPVersion.VERSION_201) {
+    return
+  }
+  const keys = chargingStation.ocppConfiguration?.configurationKey
+  if (!Array.isArray(keys)) {
+    return
+  }
+  for (const entry of keys) {
+    const resolved = OCPP2_PARAMETER_KEY_MAP.get(entry.key)
+    if (resolved != null) {
+      logger.warn(
+        `${chargingStation.logPrefix()} Template uses OCPP 1.6 key '${entry.key}', use OCPP 2.0 variable '${resolved}' instead`
+      )
+    }
+  }
+}
 
 interface AddConfigurationKeyParams {
   caseInsensitive?: boolean
@@ -33,8 +177,9 @@ export const getConfigurationKey = (
   caseInsensitive = false
 ): ConfigurationKey | undefined => {
   if (!Array.isArray(chargingStation.ocppConfiguration?.configurationKey)) return undefined
+  const resolvedKey = resolveKey(chargingStation, key)
   return chargingStation.ocppConfiguration.configurationKey.find(configElement =>
-    matchesConfigurationKey(configElement, key, caseInsensitive)
+    matchesConfigurationKey(configElement, resolvedKey, caseInsensitive)
   )
 }
 
@@ -46,8 +191,9 @@ const getConfigurationKeyIndex = (
   if (!Array.isArray(chargingStation.ocppConfiguration?.configurationKey)) {
     return -1
   }
+  const resolvedKey = resolveKey(chargingStation, key)
   return chargingStation.ocppConfiguration.configurationKey.findIndex(configElement =>
-    matchesConfigurationKey(configElement, key, caseInsensitive)
+    matchesConfigurationKey(configElement, resolvedKey, caseInsensitive)
   )
 }
 
@@ -75,8 +221,7 @@ export const addConfigurationKey = (
     if (params.overwrite) {
       chargingStation.ocppConfiguration.configurationKey[keyIndex] = {
         ...chargingStation.ocppConfiguration.configurationKey[keyIndex],
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        readonly: options.readonly!,
+        readonly: options.readonly ?? false,
         reboot: options.reboot,
         value,
         visible: options.visible,
@@ -87,8 +232,7 @@ export const addConfigurationKey = (
         configurationKey.reboot = options.reboot
       }
       if (options.readonly != null && configurationKey.readonly !== options.readonly) {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        configurationKey.readonly = options.readonly!
+        configurationKey.readonly = options.readonly
       }
       if (options.visible != null && configurationKey.visible !== options.visible) {
         configurationKey.visible = options.visible
@@ -101,9 +245,8 @@ export const addConfigurationKey = (
     }
   } else {
     chargingStation.ocppConfiguration.configurationKey.push({
-      key,
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      readonly: options.readonly!,
+      key: resolveKey(chargingStation, key),
+      readonly: options.readonly ?? false,
       reboot: options.reboot,
       value,
       visible: options.visible,
@@ -129,7 +272,7 @@ export const setConfigurationKeyValue = (
     return keyFound
   }
   logger.error(
-    `${chargingStation.logPrefix()} Trying to set a value on a non existing configuration key: %j`,
+    `${chargingStation.logPrefix()} Trying to set a value on a non-existent configuration key: %j`,
     { key, value }
   )
   return undefined

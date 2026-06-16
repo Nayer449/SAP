@@ -33,6 +33,7 @@ import {
   type ChangeConfigurationResponse,
   type ClearCacheResponse,
   ConfigurationSection,
+  type ConnectorStatus,
   ErrorType,
   type GenericResponse,
   GenericStatus,
@@ -40,6 +41,7 @@ import {
   type GetConfigurationResponse,
   type GetDiagnosticsRequest,
   type GetDiagnosticsResponse,
+  type IncomingRequestCommand,
   type IncomingRequestHandler,
   type JsonType,
   type LogConfiguration,
@@ -50,7 +52,6 @@ import {
   type OCPP16CancelReservationRequest,
   type OCPP16ChangeAvailabilityRequest,
   type OCPP16ChangeAvailabilityResponse,
-  OCPP16ChargePointErrorCode,
   OCPP16ChargePointStatus,
   type OCPP16ChargingProfile,
   OCPP16ChargingProfilePurposeType,
@@ -67,13 +68,19 @@ import {
   type OCPP16FirmwareStatusNotificationResponse,
   type OCPP16GetCompositeScheduleRequest,
   type OCPP16GetCompositeScheduleResponse,
+  type OCPP16GetLocalListVersionResponse,
   type OCPP16HeartbeatRequest,
   type OCPP16HeartbeatResponse,
   OCPP16IncomingRequestCommand,
   OCPP16MessageTrigger,
+  type OCPP16MeterValue,
+  type OCPP16MeterValuesRequest,
+  type OCPP16MeterValuesResponse,
   OCPP16RequestCommand,
   type OCPP16ReserveNowRequest,
   type OCPP16ReserveNowResponse,
+  type OCPP16SendLocalListRequest,
+  type OCPP16SendLocalListResponse,
   OCPP16StandardParametersKey,
   type OCPP16StartTransactionRequest,
   type OCPP16StartTransactionResponse,
@@ -86,6 +93,7 @@ import {
   OCPP16TriggerMessageStatus,
   type OCPP16UpdateFirmwareRequest,
   type OCPP16UpdateFirmwareResponse,
+  OCPP16UpdateType,
   type OCPPConfigurationKey,
   OCPPVersion,
   type RemoteStartTransactionRequest,
@@ -99,21 +107,31 @@ import {
 } from '../../../types/index.js'
 import {
   Configuration,
-  Constants,
   convertToDate,
   convertToInt,
+  convertToIntOrNaN,
+  ensureError,
   formatDurationMilliSeconds,
   handleIncomingRequestError,
-  isAsyncFunction,
   isEmpty,
   isNotEmptyArray,
   isNotEmptyString,
   logger,
   sleep,
+  truncateId,
 } from '../../../utils/index.js'
+import { AuthContext, type DifferentialAuthEntry, OCPPAuthServiceFactory } from '../auth/index.js'
+import { sendAndSetConnectorStatus } from '../OCPPConnectorStatusOperations.js'
 import { OCPPConstants } from '../OCPPConstants.js'
 import { OCPPIncomingRequestService } from '../OCPPIncomingRequestService.js'
-import { OCPPServiceUtils } from '../OCPPServiceUtils.js'
+import { isIdTagAuthorized } from '../OCPPServiceOperations.js'
+import {
+  buildMeterValue,
+  createPayloadValidatorMap,
+  isConnectorIdValid,
+  isIncomingRequestCommandSupported,
+  isMessageTriggerSupported,
+} from '../OCPPServiceUtils.js'
 import { OCPP16Constants } from './OCPP16Constants.js'
 import { OCPP16ServiceUtils } from './OCPP16ServiceUtils.js'
 
@@ -154,86 +172,102 @@ const moduleName = 'OCPP16IncomingRequestService'
  */
 
 export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
+  protected readonly csmsName = 'central system'
+  protected readonly incomingRequestHandlers: Map<IncomingRequestCommand, IncomingRequestHandler>
+
+  protected readonly moduleName = moduleName
+
   protected payloadValidatorFunctions: Map<OCPP16IncomingRequestCommand, ValidateFunction<JsonType>>
 
-  private readonly incomingRequestHandlers: Map<
-    OCPP16IncomingRequestCommand,
-    IncomingRequestHandler
-  >
+  protected readonly pendingStateBlockedCommands: IncomingRequestCommand[] = [
+    OCPP16IncomingRequestCommand.REMOTE_START_TRANSACTION,
+    OCPP16IncomingRequestCommand.REMOTE_STOP_TRANSACTION,
+  ]
 
+  /**
+   * Constructs an OCPP 1.6 Incoming Request Service with request handlers, validators, and event listeners.
+   */
   public constructor () {
     super(OCPPVersion.VERSION_16)
-    this.incomingRequestHandlers = new Map<OCPP16IncomingRequestCommand, IncomingRequestHandler>([
+    this.incomingRequestHandlers = new Map<IncomingRequestCommand, IncomingRequestHandler>([
       [
         OCPP16IncomingRequestCommand.CANCEL_RESERVATION,
-        this.handleRequestCancelReservation.bind(this) as unknown as IncomingRequestHandler,
+        this.toRequestHandler(this.handleRequestCancelReservation.bind(this)),
       ],
       [
         OCPP16IncomingRequestCommand.CHANGE_AVAILABILITY,
-        this.handleRequestChangeAvailability.bind(this) as unknown as IncomingRequestHandler,
+        this.toRequestHandler(this.handleRequestChangeAvailability.bind(this)),
       ],
       [
         OCPP16IncomingRequestCommand.CHANGE_CONFIGURATION,
-        this.handleRequestChangeConfiguration.bind(this) as unknown as IncomingRequestHandler,
+        this.toRequestHandler(this.handleRequestChangeConfiguration.bind(this)),
       ],
       [
         OCPP16IncomingRequestCommand.CLEAR_CACHE,
-        this.handleRequestClearCache.bind(this) as unknown as IncomingRequestHandler,
+        this.toRequestHandler(this.handleRequestClearCache.bind(this)),
       ],
       [
         OCPP16IncomingRequestCommand.CLEAR_CHARGING_PROFILE,
-        this.handleRequestClearChargingProfile.bind(this) as unknown as IncomingRequestHandler,
+        this.toRequestHandler(this.handleRequestClearChargingProfile.bind(this)),
       ],
       [
         OCPP16IncomingRequestCommand.DATA_TRANSFER,
-        this.handleRequestDataTransfer.bind(this) as unknown as IncomingRequestHandler,
+        this.toRequestHandler(this.handleRequestDataTransfer.bind(this)),
       ],
       [
         OCPP16IncomingRequestCommand.GET_COMPOSITE_SCHEDULE,
-        this.handleRequestGetCompositeSchedule.bind(this) as unknown as IncomingRequestHandler,
+        this.toRequestHandler(this.handleRequestGetCompositeSchedule.bind(this)),
       ],
       [
         OCPP16IncomingRequestCommand.GET_CONFIGURATION,
-        this.handleRequestGetConfiguration.bind(this) as unknown as IncomingRequestHandler,
+        this.toRequestHandler(this.handleRequestGetConfiguration.bind(this)),
       ],
       [
         OCPP16IncomingRequestCommand.GET_DIAGNOSTICS,
-        this.handleRequestGetDiagnostics.bind(this) as unknown as IncomingRequestHandler,
+        this.toRequestHandler(this.handleRequestGetDiagnostics.bind(this)),
+      ],
+      [
+        OCPP16IncomingRequestCommand.GET_LOCAL_LIST_VERSION,
+        this.toRequestHandler(this.handleRequestGetLocalListVersion.bind(this)),
       ],
       [
         OCPP16IncomingRequestCommand.REMOTE_START_TRANSACTION,
-        this.handleRequestRemoteStartTransaction.bind(this) as unknown as IncomingRequestHandler,
+        this.toRequestHandler(this.handleRequestRemoteStartTransaction.bind(this)),
       ],
       [
         OCPP16IncomingRequestCommand.REMOTE_STOP_TRANSACTION,
-        this.handleRequestRemoteStopTransaction.bind(this) as unknown as IncomingRequestHandler,
+        this.toRequestHandler(this.handleRequestRemoteStopTransaction.bind(this)),
       ],
       [
         OCPP16IncomingRequestCommand.RESERVE_NOW,
-        this.handleRequestReserveNow.bind(this) as unknown as IncomingRequestHandler,
+        this.toRequestHandler(this.handleRequestReserveNow.bind(this)),
       ],
       [
         OCPP16IncomingRequestCommand.RESET,
-        this.handleRequestReset.bind(this) as unknown as IncomingRequestHandler,
+        this.toRequestHandler(this.handleRequestReset.bind(this)),
+      ],
+      [
+        OCPP16IncomingRequestCommand.SEND_LOCAL_LIST,
+        this.toRequestHandler(this.handleRequestSendLocalList.bind(this)),
       ],
       [
         OCPP16IncomingRequestCommand.SET_CHARGING_PROFILE,
-        this.handleRequestSetChargingProfile.bind(this) as unknown as IncomingRequestHandler,
+        this.toRequestHandler(this.handleRequestSetChargingProfile.bind(this)),
       ],
       [
         OCPP16IncomingRequestCommand.TRIGGER_MESSAGE,
-        this.handleRequestTriggerMessage.bind(this) as unknown as IncomingRequestHandler,
+        this.toRequestHandler(this.handleRequestTriggerMessage.bind(this)),
       ],
       [
         OCPP16IncomingRequestCommand.UNLOCK_CONNECTOR,
-        this.handleRequestUnlockConnector.bind(this) as unknown as IncomingRequestHandler,
+        this.toRequestHandler(this.handleRequestUnlockConnector.bind(this)),
       ],
       [
         OCPP16IncomingRequestCommand.UPDATE_FIRMWARE,
-        this.handleRequestUpdateFirmware.bind(this) as unknown as IncomingRequestHandler,
+        this.toRequestHandler(this.handleRequestUpdateFirmware.bind(this)),
       ],
     ])
-    this.payloadValidatorFunctions = OCPP16ServiceUtils.createPayloadValidatorMap(
+    this.payloadValidatorFunctions = createPayloadValidatorMap(
       OCPP16ServiceUtils.createIncomingRequestPayloadConfigs(),
       OCPP16ServiceUtils.createPayloadOptions(moduleName, 'constructor'),
       this.ajv
@@ -248,8 +282,12 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
       ) => {
         if (response.status === GenericStatus.Accepted) {
           const { connectorId, idTag } = request
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          chargingStation.getConnectorStatus(connectorId!)!.transactionRemoteStarted = true
+          if (connectorId != null) {
+            const connectorStatus = chargingStation.getConnectorStatus(connectorId)
+            if (connectorStatus != null) {
+              connectorStatus.transactionRemoteStarted = true
+            }
+          }
           chargingStation.ocppRequestService
             .requestHandler<Partial<OCPP16StartTransactionRequest>, OCPP16StartTransactionResponse>(
               chargingStation,
@@ -266,7 +304,7 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
                     // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
                     chargingStation.stationInfo?.chargingStationId
                     // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
-                  }#${connectorId?.toString()} for idTag '${idTag}'`
+                  }#${connectorId?.toString()} for idTag '${truncateId(idTag)}'`
                 )
               } else {
                 logger.debug(
@@ -274,7 +312,7 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
                     // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
                     chargingStation.stationInfo?.chargingStationId
                     // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
-                  }#${connectorId?.toString()} for idTag '${idTag}'`
+                  }#${connectorId?.toString()} for idTag '${truncateId(idTag)}'`
                 )
               }
               return undefined
@@ -297,8 +335,10 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
       ) => {
         if (response.status === GenericStatus.Accepted) {
           const { transactionId } = request
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          const connectorId = chargingStation.getConnectorIdByTransactionId(transactionId)!
+          const connectorId = chargingStation.getConnectorIdByTransactionId(transactionId)
+          if (connectorId == null) {
+            return
+          }
           OCPP16ServiceUtils.remoteStopTransaction(chargingStation, connectorId)
             .then(response => {
               if (response.status === GenericStatus.Accepted) {
@@ -353,6 +393,53 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
               >(chargingStation, OCPP16RequestCommand.BOOT_NOTIFICATION, chargingStation.bootNotificationRequest as OCPP16BootNotificationRequest, { skipBufferingOnError: true, triggerMessage: true })
               .catch(errorHandler)
             break
+          case OCPP16MessageTrigger.DiagnosticsStatusNotification:
+            chargingStation.ocppRequestService
+              .requestHandler<
+                OCPP16DiagnosticsStatusNotificationRequest,
+                OCPP16DiagnosticsStatusNotificationResponse
+              >(
+                chargingStation,
+                OCPP16RequestCommand.DIAGNOSTICS_STATUS_NOTIFICATION,
+                {
+                  // §4.4 + §7.24: Idle when not busy uploading diagnostics
+                  status:
+                    chargingStation.stationInfo?.diagnosticsStatus ===
+                    OCPP16DiagnosticsStatus.Uploading
+                      ? OCPP16DiagnosticsStatus.Uploading
+                      : OCPP16DiagnosticsStatus.Idle,
+                },
+                {
+                  triggerMessage: true,
+                }
+              )
+              .catch(errorHandler)
+            break
+          case OCPP16MessageTrigger.FirmwareStatusNotification:
+            chargingStation.ocppRequestService
+              .requestHandler<
+                OCPP16FirmwareStatusNotificationRequest,
+                OCPP16FirmwareStatusNotificationResponse
+              >(
+                chargingStation,
+                OCPP16RequestCommand.FIRMWARE_STATUS_NOTIFICATION,
+                {
+                  // §4.5 + §7.25: Idle when not busy downloading/installing firmware
+                  status:
+                    chargingStation.stationInfo?.firmwareStatus ===
+                      OCPP16FirmwareStatus.Downloading ||
+                    chargingStation.stationInfo?.firmwareStatus ===
+                      OCPP16FirmwareStatus.Downloaded ||
+                    chargingStation.stationInfo?.firmwareStatus === OCPP16FirmwareStatus.Installing
+                      ? chargingStation.stationInfo.firmwareStatus
+                      : OCPP16FirmwareStatus.Idle,
+                },
+                {
+                  triggerMessage: true,
+                }
+              )
+              .catch(errorHandler)
+            break
           case OCPP16MessageTrigger.Heartbeat:
             chargingStation.ocppRequestService
               .requestHandler<OCPP16HeartbeatRequest, OCPP16HeartbeatResponse>(
@@ -365,37 +452,52 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
               )
               .catch(errorHandler)
             break
-          case OCPP16MessageTrigger.StatusNotification:
+          case OCPP16MessageTrigger.MeterValues:
             if (connectorId != null) {
-              chargingStation.ocppRequestService
-                .requestHandler<OCPP16StatusNotificationRequest, OCPP16StatusNotificationResponse>(
-                  chargingStation,
-                  OCPP16RequestCommand.STATUS_NOTIFICATION,
-                  {
-                    connectorId,
-                    errorCode: OCPP16ChargePointErrorCode.NO_ERROR,
-                    status: chargingStation.getConnectorStatus(connectorId)
-                      ?.status as OCPP16ChargePointStatus,
-                  },
-                  {
-                    triggerMessage: true,
-                  }
-                )
-                .catch(errorHandler)
-            } else if (chargingStation.hasEvses) {
-              for (const evseStatus of chargingStation.evses.values()) {
-                for (const [id, connectorStatus] of evseStatus.connectors) {
+              const connectorStatus = chargingStation.getConnectorStatus(connectorId)
+              if (
+                connectorStatus?.transactionStarted === true &&
+                connectorStatus.transactionId != null
+              ) {
+                chargingStation.ocppRequestService
+                  .requestHandler<OCPP16MeterValuesRequest, OCPP16MeterValuesResponse>(
+                    chargingStation,
+                    OCPP16RequestCommand.METER_VALUES,
+                    {
+                      connectorId,
+                      meterValue: [
+                        buildMeterValue(
+                          chargingStation,
+                          convertToInt(connectorStatus.transactionId),
+                          0
+                        ) as OCPP16MeterValue,
+                      ],
+                      transactionId: convertToInt(connectorStatus.transactionId),
+                    },
+                    {
+                      triggerMessage: true,
+                    }
+                  )
+                  .catch(errorHandler)
+              }
+            } else {
+              for (let id = 1; id <= chargingStation.getNumberOfConnectors(); id++) {
+                const cs = chargingStation.getConnectorStatus(id)
+                if (cs?.transactionStarted === true && cs.transactionId != null) {
                   chargingStation.ocppRequestService
-                    .requestHandler<
-                      OCPP16StatusNotificationRequest,
-                      OCPP16StatusNotificationResponse
-                    >(
+                    .requestHandler<OCPP16MeterValuesRequest, OCPP16MeterValuesResponse>(
                       chargingStation,
-                      OCPP16RequestCommand.STATUS_NOTIFICATION,
+                      OCPP16RequestCommand.METER_VALUES,
                       {
                         connectorId: id,
-                        errorCode: OCPP16ChargePointErrorCode.NO_ERROR,
-                        status: connectorStatus.status as OCPP16ChargePointStatus,
+                        meterValue: [
+                          buildMeterValue(
+                            chargingStation,
+                            convertToInt(cs.transactionId),
+                            0
+                          ) as OCPP16MeterValue,
+                        ],
+                        transactionId: convertToInt(cs.transactionId),
                       },
                       {
                         triggerMessage: true,
@@ -404,8 +506,26 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
                     .catch(errorHandler)
                 }
               }
+            }
+            break
+          case OCPP16MessageTrigger.StatusNotification:
+            if (connectorId != null) {
+              chargingStation.ocppRequestService
+                .requestHandler<OCPP16StatusNotificationRequest, OCPP16StatusNotificationResponse>(
+                  chargingStation,
+                  OCPP16RequestCommand.STATUS_NOTIFICATION,
+                  {
+                    connectorId,
+                    status: chargingStation.getConnectorStatus(connectorId)
+                      ?.status as OCPP16ChargePointStatus,
+                  } as unknown as OCPP16StatusNotificationRequest,
+                  {
+                    triggerMessage: true,
+                  }
+                )
+                .catch(errorHandler)
             } else {
-              for (const [id, connectorStatus] of chargingStation.connectors) {
+              for (const { connectorId, connectorStatus } of chargingStation.iterateConnectors()) {
                 chargingStation.ocppRequestService
                   .requestHandler<
                     OCPP16StatusNotificationRequest,
@@ -414,10 +534,9 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
                     chargingStation,
                     OCPP16RequestCommand.STATUS_NOTIFICATION,
                     {
-                      connectorId: id,
-                      errorCode: OCPP16ChargePointErrorCode.NO_ERROR,
+                      connectorId,
                       status: connectorStatus.status as OCPP16ChargePointStatus,
-                    },
+                    } as unknown as OCPP16StatusNotificationRequest,
                     {
                       triggerMessage: true,
                     }
@@ -429,101 +548,126 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
         }
       }
     )
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters
-  public async incomingRequestHandler<ReqType extends JsonType, ResType extends JsonType>(
-    chargingStation: ChargingStation,
-    messageId: string,
-    commandName: OCPP16IncomingRequestCommand,
-    commandPayload: ReqType
-  ): Promise<void> {
-    let response: ResType
-    if (
-      chargingStation.stationInfo?.ocppStrictCompliance === true &&
-      chargingStation.inPendingState() &&
-      (commandName === OCPP16IncomingRequestCommand.REMOTE_START_TRANSACTION ||
-        commandName === OCPP16IncomingRequestCommand.REMOTE_STOP_TRANSACTION)
-    ) {
-      throw new OCPPError(
-        ErrorType.SECURITY_ERROR,
-        `${commandName} cannot be issued to handle request PDU ${JSON.stringify(
-          commandPayload,
-          undefined,
-          2
-        )} while the charging station is in pending state on the central system`,
-        commandName,
-        commandPayload
-      )
-    }
-    if (
-      chargingStation.inAcceptedState() ||
-      chargingStation.inPendingState() ||
-      (chargingStation.stationInfo?.ocppStrictCompliance === false &&
-        chargingStation.inUnknownState())
-    ) {
-      if (
-        this.incomingRequestHandlers.has(commandName) &&
-        OCPP16ServiceUtils.isIncomingRequestCommandSupported(chargingStation, commandName)
-      ) {
-        try {
-          this.validateIncomingRequestPayload(chargingStation, commandName, commandPayload)
-          // Call the method to build the response
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          const incomingRequestHandler = this.incomingRequestHandlers.get(commandName)!
-          if (isAsyncFunction(incomingRequestHandler)) {
-            response = (await incomingRequestHandler(chargingStation, commandPayload)) as ResType
-          } else {
-            response = incomingRequestHandler(chargingStation, commandPayload) as ResType
-          }
-        } catch (error) {
-          // Log
-          logger.error(
-            `${chargingStation.logPrefix()} ${moduleName}.incomingRequestHandler: Handle incoming request error:`,
-            error
-          )
-          throw error
+    this.on(
+      OCPP16IncomingRequestCommand.UPDATE_FIRMWARE,
+      (
+        chargingStation: ChargingStation,
+        request: OCPP16UpdateFirmwareRequest,
+        _response: OCPP16UpdateFirmwareResponse
+      ) => {
+        const retrieveDate = convertToDate(request.retrieveDate)
+        if (retrieveDate == null) return
+        const now = Date.now()
+        if (retrieveDate.getTime() <= now) {
+          this.updateFirmwareSimulation(chargingStation).catch((error: unknown) => {
+            logger.error(
+              `${chargingStation.logPrefix()} ${moduleName}.constructor: UpdateFirmware simulation error:`,
+              error
+            )
+          })
+        } else {
+          setTimeout(() => {
+            this.updateFirmwareSimulation(chargingStation).catch((error: unknown) => {
+              logger.error(
+                `${chargingStation.logPrefix()} ${moduleName}.constructor: UpdateFirmware simulation error:`,
+                error
+              )
+            })
+          }, retrieveDate.getTime() - now)
         }
-      } else {
-        // Throw exception
-        throw new OCPPError(
-          ErrorType.NOT_IMPLEMENTED,
-          `${commandName} is not implemented to handle request PDU ${JSON.stringify(
-            commandPayload,
-            undefined,
-            2
-          )}`,
-          commandName,
-          commandPayload
-        )
       }
-    } else {
-      throw new OCPPError(
-        ErrorType.SECURITY_ERROR,
-        `${commandName} cannot be issued to handle request PDU ${JSON.stringify(
-          commandPayload,
-          undefined,
-          2
-        )} while the charging station is not registered on the central system`,
-        commandName,
-        commandPayload
-      )
-    }
-    // Send the built response
-    await chargingStation.ocppRequestService.sendResponse(
-      chargingStation,
-      messageId,
-      response,
-      commandName
     )
-    // Emit command name event to allow delayed handling only if there are listeners
-    if (this.listenerCount(commandName) > 0) {
-      this.emit(commandName, chargingStation, commandPayload, response)
-    }
   }
 
+  /**
+   * Stops the incoming request service for the given charging station.
+   * @param chargingStation - Target charging station
+   */
   public override stop (chargingStation: ChargingStation): void {
     /* no-op for OCPP 1.6 */
+  }
+
+  /**
+   * Checks whether the given incoming request command is supported by the charging station.
+   * @param chargingStation - Target charging station
+   * @param commandName - Incoming request command to check
+   * @returns Whether the command is supported
+   */
+  protected isIncomingRequestCommandSupported (
+    chargingStation: ChargingStation,
+    commandName: IncomingRequestCommand
+  ): boolean {
+    return isIncomingRequestCommandSupported(chargingStation, commandName)
+  }
+
+  private composeCompositeSchedule (
+    chargingStation: ChargingStation,
+    chargingProfiles: OCPP16ChargingProfile[],
+    duration: number,
+    connectorStatus: ConnectorStatus | undefined
+  ): OCPP16ChargingSchedule | undefined {
+    const currentDate = new Date()
+    const compositeScheduleInterval: Interval = {
+      end: addSeconds(currentDate, duration),
+      start: currentDate,
+    }
+    let previousCompositeSchedule: OCPP16ChargingSchedule | undefined
+    let compositeSchedule: OCPP16ChargingSchedule | undefined
+    for (const chargingProfile of chargingProfiles) {
+      if (chargingProfile.chargingSchedule.startSchedule == null) {
+        logger.debug(
+          `${chargingStation.logPrefix()} ${moduleName}.composeCompositeSchedule: Charging profile id ${chargingProfile.chargingProfileId.toString()} has no startSchedule defined. Trying to set it to the ${connectorStatus != null ? 'connector current transaction start date' : 'current date'}`
+        )
+        chargingProfile.chargingSchedule.startSchedule =
+          connectorStatus != null ? connectorStatus.transactionStart : currentDate
+      }
+      if (!isDate(chargingProfile.chargingSchedule.startSchedule)) {
+        logger.warn(
+          `${chargingStation.logPrefix()} ${moduleName}.composeCompositeSchedule: Charging profile id ${chargingProfile.chargingProfileId.toString()} startSchedule property is not a Date instance. Trying to convert it to a Date instance`
+        )
+        chargingProfile.chargingSchedule.startSchedule = convertToDate(
+          chargingProfile.chargingSchedule.startSchedule
+        )
+      }
+      if (
+        chargingProfile.chargingSchedule.duration == null &&
+        chargingProfile.chargingSchedule.startSchedule != null
+      ) {
+        logger.debug(
+          `${chargingStation.logPrefix()} ${moduleName}.composeCompositeSchedule: Charging profile id ${chargingProfile.chargingProfileId.toString()} has no duration defined and will be set to the maximum time allowed`
+        )
+        chargingProfile.chargingSchedule.duration = differenceInSeconds(
+          maxTime,
+          chargingProfile.chargingSchedule.startSchedule
+        )
+      }
+      if (
+        !prepareChargingProfileKind(
+          connectorStatus,
+          chargingProfile,
+          compositeScheduleInterval.start,
+          chargingStation.logPrefix()
+        )
+      ) {
+        continue
+      }
+      if (
+        !canProceedChargingProfile(
+          chargingProfile,
+          compositeScheduleInterval.start,
+          chargingStation.logPrefix()
+        )
+      ) {
+        continue
+      }
+      compositeSchedule = OCPP16ServiceUtils.composeChargingSchedules(
+        previousCompositeSchedule,
+        chargingProfile.chargingSchedule,
+        compositeScheduleInterval
+      )
+      previousCompositeSchedule = compositeSchedule
+    }
+    return compositeSchedule
   }
 
   private async handleRequestCancelReservation (
@@ -554,15 +698,16 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
       )
       return OCPP16Constants.OCPP_CANCEL_RESERVATION_RESPONSE_ACCEPTED
     } catch (error) {
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      return handleIncomingRequestError<GenericResponse>(
-        chargingStation,
-        OCPP16IncomingRequestCommand.CANCEL_RESERVATION,
-        error as Error,
-        {
-          errorResponse: OCPP16Constants.OCPP_CANCEL_RESERVATION_RESPONSE_REJECTED,
-        }
-      )!
+      return (
+        handleIncomingRequestError<GenericResponse>(
+          chargingStation,
+          OCPP16IncomingRequestCommand.CANCEL_RESERVATION,
+          ensureError(error),
+          {
+            errorResponse: OCPP16Constants.OCPP_CANCEL_RESERVATION_RESPONSE_REJECTED,
+          }
+        ) ?? OCPP16Constants.OCPP_CANCEL_RESERVATION_RESPONSE_REJECTED
+      )
     }
   }
 
@@ -572,8 +717,8 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
   ): Promise<OCPP16ChangeAvailabilityResponse> {
     const { connectorId, type } = commandPayload
     if (!chargingStation.hasConnector(connectorId)) {
-      logger.error(
-        `${chargingStation.logPrefix()} ${moduleName}.handleRequestChangeAvailability: Trying to change the availability of a non existing connector id ${connectorId.toString()}`
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestChangeAvailability: Trying to change the availability of a non-existent connector id ${connectorId.toString()}`
       )
       return OCPP16Constants.OCPP_AVAILABILITY_RESPONSE_REJECTED
     }
@@ -582,26 +727,16 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
         ? OCPP16ChargePointStatus.Available
         : OCPP16ChargePointStatus.Unavailable
     if (connectorId === 0) {
-      let response: OCPP16ChangeAvailabilityResponse | undefined
-      if (chargingStation.hasEvses) {
-        for (const evseStatus of chargingStation.evses.values()) {
-          response = await OCPP16ServiceUtils.changeAvailability(
-            chargingStation,
-            [...evseStatus.connectors.keys()],
-            chargePointStatus,
-            type
-          )
-        }
-      } else {
-        response = await OCPP16ServiceUtils.changeAvailability(
-          chargingStation,
-          [...chargingStation.connectors.keys()],
-          chargePointStatus,
-          type
-        )
-      }
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      return response!
+      const response = await OCPP16ServiceUtils.changeAvailability(
+        chargingStation,
+        chargingStation
+          .iterateConnectors()
+          .map(({ connectorId }) => connectorId)
+          .toArray(),
+        chargePointStatus,
+        type
+      )
+      return response
     } else if (
       connectorId > 0 &&
       (chargingStation.isChargingStationAvailable() ||
@@ -609,17 +744,20 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
           type === OCPP16AvailabilityType.Inoperative))
     ) {
       if (chargingStation.getConnectorStatus(connectorId)?.transactionStarted === true) {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        chargingStation.getConnectorStatus(connectorId)!.availability = type
+        const connectorStatus = chargingStation.getConnectorStatus(connectorId)
+        if (connectorStatus != null) {
+          connectorStatus.availability = type
+        }
         return OCPP16Constants.OCPP_AVAILABILITY_RESPONSE_SCHEDULED
       }
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      chargingStation.getConnectorStatus(connectorId)!.availability = type
-      await OCPP16ServiceUtils.sendAndSetConnectorStatus(
-        chargingStation,
+      const connectorStatus = chargingStation.getConnectorStatus(connectorId)
+      if (connectorStatus != null) {
+        connectorStatus.availability = type
+      }
+      await sendAndSetConnectorStatus(chargingStation, {
         connectorId,
-        chargePointStatus
-      )
+        status: chargePointStatus,
+      } as OCPP16StatusNotificationRequest)
       return OCPP16Constants.OCPP_AVAILABILITY_RESPONSE_ACCEPTED
     }
     return OCPP16Constants.OCPP_AVAILABILITY_RESPONSE_REJECTED
@@ -634,6 +772,21 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
     if (keyToChange?.readonly === true) {
       return OCPP16Constants.OCPP_CONFIGURATION_RESPONSE_REJECTED
     } else if (keyToChange?.readonly === false) {
+      const integerKeys = new Set([
+        OCPP16StandardParametersKey.ConnectionTimeOut,
+        OCPP16StandardParametersKey.HeartBeatInterval,
+        OCPP16StandardParametersKey.HeartbeatInterval,
+        OCPP16StandardParametersKey.MeterValueSampleInterval,
+        OCPP16StandardParametersKey.TransactionMessageAttempts,
+        OCPP16StandardParametersKey.TransactionMessageRetryInterval,
+        OCPP16StandardParametersKey.WebSocketPingInterval,
+      ])
+      if (integerKeys.has(keyToChange.key as OCPP16StandardParametersKey)) {
+        const numValue = Number(value)
+        if (!Number.isInteger(numValue) || numValue < 0) {
+          return OCPP16Constants.OCPP_CONFIGURATION_RESPONSE_REJECTED
+        }
+      }
       let valueChanged = false
       if (keyToChange.value !== value) {
         setConfigurationKeyValue(chargingStation, key, value, true)
@@ -686,7 +839,9 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
           connectorId++
         ) {
           if (chargingStation.getConnectorStatus(connectorId)?.transactionStarted === true) {
-            chargingStation.restartMeterValues(
+            OCPP16ServiceUtils.stopUpdatedMeterValues(chargingStation, connectorId)
+            OCPP16ServiceUtils.startUpdatedMeterValues(
+              chargingStation,
               connectorId,
               secondsToMilliseconds(convertToInt(value))
             )
@@ -702,8 +857,9 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
   }
 
   private handleRequestClearCache (chargingStation: ChargingStation): ClearCacheResponse {
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    if (chargingStation.idTagsCache.deleteIdTags(getIdTagsFile(chargingStation.stationInfo!)!)) {
+    const idTagsFile =
+      chargingStation.stationInfo != null ? getIdTagsFile(chargingStation.stationInfo) : undefined
+    if (idTagsFile != null && chargingStation.idTagsCache.deleteIdTags(idTagsFile)) {
       return OCPPConstants.OCPP_RESPONSE_ACCEPTED
     }
     return OCPPConstants.OCPP_RESPONSE_REJECTED
@@ -725,44 +881,43 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
     const { connectorId } = commandPayload
     if (connectorId != null) {
       if (!chargingStation.hasConnector(connectorId)) {
-        logger.error(
-          `${chargingStation.logPrefix()} ${moduleName}.handleRequestClearChargingProfile: Trying to clear a charging profile(s) to a non existing connector id ${connectorId.toString()}`
+        logger.warn(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestClearChargingProfile: Trying to clear a charging profile(s) to a non-existent connector id ${connectorId.toString()}`
         )
         return OCPP16Constants.OCPP_CLEAR_CHARGING_PROFILE_RESPONSE_UNKNOWN
       }
       const connectorStatus = chargingStation.getConnectorStatus(connectorId)
       if (isNotEmptyArray(connectorStatus?.chargingProfiles)) {
-        connectorStatus.chargingProfiles = []
-        logger.debug(
-          `${chargingStation.logPrefix()} ${moduleName}.handleRequestClearChargingProfile: Charging profile(s) cleared on connector id ${connectorId.toString()}`
+        const { chargingProfilePurpose, id, stackLevel } = commandPayload
+        if (id == null && chargingProfilePurpose == null && stackLevel == null) {
+          connectorStatus.chargingProfiles = []
+          logger.debug(
+            `${chargingStation.logPrefix()} ${moduleName}.handleRequestClearChargingProfile: All charging profile(s) cleared on connector id ${connectorId.toString()}`
+          )
+          return OCPP16Constants.OCPP_CLEAR_CHARGING_PROFILE_RESPONSE_ACCEPTED
+        }
+        const clearedCP = OCPP16ServiceUtils.clearChargingProfiles(
+          chargingStation,
+          commandPayload,
+          connectorStatus.chargingProfiles as OCPP16ChargingProfile[]
         )
-        return OCPP16Constants.OCPP_CLEAR_CHARGING_PROFILE_RESPONSE_ACCEPTED
+        if (clearedCP) {
+          logger.debug(
+            `${chargingStation.logPrefix()} ${moduleName}.handleRequestClearChargingProfile: Matching charging profile(s) cleared on connector id ${connectorId.toString()}`
+          )
+          return OCPP16Constants.OCPP_CLEAR_CHARGING_PROFILE_RESPONSE_ACCEPTED
+        }
       }
     } else {
       let clearedCP = false
-      if (chargingStation.hasEvses) {
-        for (const evseStatus of chargingStation.evses.values()) {
-          for (const status of evseStatus.connectors.values()) {
-            const clearedConnectorCP = OCPP16ServiceUtils.clearChargingProfiles(
-              chargingStation,
-              commandPayload,
-              status.chargingProfiles as OCPP16ChargingProfile[]
-            )
-            if (clearedConnectorCP && !clearedCP) {
-              clearedCP = true
-            }
-          }
-        }
-      } else {
-        for (const id of chargingStation.connectors.keys()) {
-          const clearedConnectorCP = OCPP16ServiceUtils.clearChargingProfiles(
-            chargingStation,
-            commandPayload,
-            chargingStation.getConnectorStatus(id)?.chargingProfiles as OCPP16ChargingProfile[]
-          )
-          if (clearedConnectorCP && !clearedCP) {
-            clearedCP = true
-          }
+      for (const { connectorStatus } of chargingStation.iterateConnectors()) {
+        const clearedConnectorCP = OCPP16ServiceUtils.clearChargingProfiles(
+          chargingStation,
+          commandPayload,
+          connectorStatus.chargingProfiles as OCPP16ChargingProfile[]
+        )
+        if (clearedConnectorCP && !clearedCP) {
+          clearedCP = true
         }
       }
       if (clearedCP) {
@@ -776,20 +931,24 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
     chargingStation: ChargingStation,
     commandPayload: OCPP16DataTransferRequest
   ): OCPP16DataTransferResponse {
-    const { vendorId } = commandPayload
+    const { messageId, vendorId } = commandPayload
     try {
-      if (vendorId === chargingStation.stationInfo?.chargePointVendor) {
-        return OCPP16Constants.OCPP_DATA_TRANSFER_RESPONSE_ACCEPTED
+      if (vendorId !== chargingStation.stationInfo?.chargePointVendor) {
+        return OCPP16Constants.OCPP_DATA_TRANSFER_RESPONSE_UNKNOWN_VENDOR_ID
       }
-      return OCPP16Constants.OCPP_DATA_TRANSFER_RESPONSE_UNKNOWN_VENDOR_ID
+      if (messageId != null) {
+        return OCPP16Constants.OCPP_DATA_TRANSFER_RESPONSE_UNKNOWN_MESSAGE_ID
+      }
+      return OCPP16Constants.OCPP_DATA_TRANSFER_RESPONSE_ACCEPTED
     } catch (error) {
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      return handleIncomingRequestError<OCPP16DataTransferResponse>(
-        chargingStation,
-        OCPP16IncomingRequestCommand.DATA_TRANSFER,
-        error as Error,
-        { errorResponse: OCPP16Constants.OCPP_DATA_TRANSFER_RESPONSE_REJECTED }
-      )!
+      return (
+        handleIncomingRequestError<OCPP16DataTransferResponse>(
+          chargingStation,
+          OCPP16IncomingRequestCommand.DATA_TRANSFER,
+          ensureError(error),
+          { errorResponse: OCPP16Constants.OCPP_DATA_TRANSFER_RESPONSE_REJECTED }
+        ) ?? OCPP16Constants.OCPP_DATA_TRANSFER_RESPONSE_REJECTED
+      )
     }
   }
 
@@ -808,15 +967,42 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
     }
     const { chargingRateUnit, connectorId, duration } = commandPayload
     if (!chargingStation.hasConnector(connectorId)) {
-      logger.error(
-        `${chargingStation.logPrefix()} ${moduleName}.handleRequestGetCompositeSchedule: Trying to get composite schedule to a non existing connector id ${connectorId.toString()}`
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestGetCompositeSchedule: Trying to get composite schedule to a non-existent connector id ${connectorId.toString()}`
       )
       return OCPP16Constants.OCPP_RESPONSE_REJECTED
     }
     if (connectorId === 0) {
-      logger.error(
-        `${chargingStation.logPrefix()} ${moduleName}.handleRequestGetCompositeSchedule: Get composite schedule on connector id ${connectorId.toString()} is not yet supported`
+      if (chargingRateUnit != null) {
+        logger.warn(
+          `${chargingStation.logPrefix()} ${moduleName}.handleRequestGetCompositeSchedule: Get composite schedule with a specified rate unit is not yet supported, no conversion will be done`
+        )
+      }
+      const allChargingProfiles: OCPP16ChargingProfile[] = []
+      for (let id = 0; id <= chargingStation.getNumberOfConnectors(); id++) {
+        if (chargingStation.hasConnector(id)) {
+          allChargingProfiles.push(
+            ...(getConnectorChargingProfiles(chargingStation, id) as OCPP16ChargingProfile[])
+          )
+        }
+      }
+      if (isEmpty(allChargingProfiles)) {
+        return OCPP16Constants.OCPP_RESPONSE_REJECTED
+      }
+      const compositeSchedule = this.composeCompositeSchedule(
+        chargingStation,
+        allChargingProfiles,
+        duration,
+        undefined
       )
+      if (compositeSchedule != null) {
+        return {
+          chargingSchedule: compositeSchedule,
+          connectorId: 0,
+          scheduleStart: compositeSchedule.startSchedule,
+          status: GenericStatus.Accepted,
+        }
+      }
       return OCPP16Constants.OCPP_RESPONSE_REJECTED
     }
     if (chargingRateUnit != null) {
@@ -831,70 +1017,16 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
     ) {
       return OCPP16Constants.OCPP_RESPONSE_REJECTED
     }
-    const currentDate = new Date()
-    const compositeScheduleInterval: Interval = {
-      end: addSeconds(currentDate, duration),
-      start: currentDate,
-    }
     const chargingProfiles = getConnectorChargingProfiles(
       chargingStation,
       connectorId
     ) as OCPP16ChargingProfile[]
-    let previousCompositeSchedule: OCPP16ChargingSchedule | undefined
-    let compositeSchedule: OCPP16ChargingSchedule | undefined
-    for (const chargingProfile of chargingProfiles) {
-      if (chargingProfile.chargingSchedule.startSchedule == null) {
-        logger.debug(
-          `${chargingStation.logPrefix()} ${moduleName}.handleRequestGetCompositeSchedule: Charging profile id ${chargingProfile.chargingProfileId.toString()} has no startSchedule defined. Trying to set it to the connector current transaction start date`
-        )
-        // OCPP specifies that if startSchedule is not defined, it should be relative to start of the connector transaction
-        chargingProfile.chargingSchedule.startSchedule = connectorStatus?.transactionStart
-      }
-      if (!isDate(chargingProfile.chargingSchedule.startSchedule)) {
-        logger.warn(
-          `${chargingStation.logPrefix()} ${moduleName}.handleRequestGetCompositeSchedule: Charging profile id ${chargingProfile.chargingProfileId.toString()} startSchedule property is not a Date instance. Trying to convert it to a Date instance`
-        )
-        chargingProfile.chargingSchedule.startSchedule = convertToDate(
-          chargingProfile.chargingSchedule.startSchedule
-        )
-      }
-      if (chargingProfile.chargingSchedule.duration == null) {
-        logger.debug(
-          `${chargingStation.logPrefix()} ${moduleName}.handleRequestGetCompositeSchedule: Charging profile id ${chargingProfile.chargingProfileId.toString()} has no duration defined and will be set to the maximum time allowed`
-        )
-        // OCPP specifies that if duration is not defined, it should be infinite
-        chargingProfile.chargingSchedule.duration = differenceInSeconds(
-          maxTime,
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          chargingProfile.chargingSchedule.startSchedule!
-        )
-      }
-      if (
-        !prepareChargingProfileKind(
-          connectorStatus,
-          chargingProfile,
-          compositeScheduleInterval.start,
-          chargingStation.logPrefix()
-        )
-      ) {
-        continue
-      }
-      if (
-        !canProceedChargingProfile(
-          chargingProfile,
-          compositeScheduleInterval.start,
-          chargingStation.logPrefix()
-        )
-      ) {
-        continue
-      }
-      compositeSchedule = OCPP16ServiceUtils.composeChargingSchedules(
-        previousCompositeSchedule,
-        chargingProfile.chargingSchedule,
-        compositeScheduleInterval
-      )
-      previousCompositeSchedule = compositeSchedule
-    }
+    const compositeSchedule = this.composeCompositeSchedule(
+      chargingStation,
+      chargingProfiles,
+      duration,
+      connectorStatus
+    )
     if (compositeSchedule != null) {
       return {
         chargingSchedule: compositeSchedule,
@@ -914,8 +1046,7 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
     const configurationKey: OCPPConfigurationKey[] = []
     const unknownKey: string[] = []
     if (key == null || isEmpty(key)) {
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      for (const configKey of chargingStation.ocppConfiguration!.configurationKey!) {
+      for (const configKey of chargingStation.ocppConfiguration?.configurationKey ?? []) {
         if (!OCPP16ServiceUtils.isConfigurationKeyVisible(configKey)) {
           continue
         }
@@ -972,14 +1103,18 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
         const logConfiguration = Configuration.getConfigurationSection<LogConfiguration>(
           ConfigurationSection.log
         )
+        const logFile = logConfiguration.file
+        if (logFile == null) {
+          logger.warn(
+            `${chargingStation.logPrefix()} ${moduleName}.handleRequestGetDiagnostics: Cannot get diagnostics: log file not configured`
+          )
+          return OCPP16Constants.OCPP_RESPONSE_EMPTY
+        }
         const logFiles = readdirSync(
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          resolve((fileURLToPath(import.meta.url), '../', dirname(logConfiguration.file!)))
+          resolve((fileURLToPath(import.meta.url), '../', dirname(logFile)))
         )
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          .filter(file => file.endsWith(extname(logConfiguration.file!)))
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          .map(file => join(dirname(logConfiguration.file!), file))
+          .filter(file => file.endsWith(extname(logFile)))
+          .map(file => join(dirname(logFile), file))
         // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
         const diagnosticsArchive = `${chargingStation.stationInfo?.chargingStationId}_logs.tar.gz`
         create({ gzip: true }, logFiles).pipe(createWriteStream(diagnosticsArchive))
@@ -998,6 +1133,9 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
                 info.bytes / 1024
               ).toString()} bytes transferred from diagnostics archive ${info.name}`
             )
+            if (chargingStation.stationInfo != null) {
+              chargingStation.stationInfo.diagnosticsStatus = OCPP16DiagnosticsStatus.Uploading
+            }
             chargingStation.ocppRequestService
               .requestHandler<
                 OCPP16DiagnosticsStatusNotificationRequest,
@@ -1025,6 +1163,9 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
             >(chargingStation, OCPP16RequestCommand.DIAGNOSTICS_STATUS_NOTIFICATION, {
               status: OCPP16DiagnosticsStatus.Uploaded,
             })
+            if (chargingStation.stationInfo != null) {
+              chargingStation.stationInfo.diagnosticsStatus = OCPP16DiagnosticsStatus.Uploaded
+            }
             ftpClient.close()
             return { fileName: diagnosticsArchive }
           }
@@ -1047,17 +1188,21 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
         >(chargingStation, OCPP16RequestCommand.DIAGNOSTICS_STATUS_NOTIFICATION, {
           status: OCPP16DiagnosticsStatus.UploadFailed,
         })
+        if (chargingStation.stationInfo != null) {
+          chargingStation.stationInfo.diagnosticsStatus = OCPP16DiagnosticsStatus.UploadFailed
+        }
         ftpClient?.close()
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        return handleIncomingRequestError<GetDiagnosticsResponse>(
-          chargingStation,
-          OCPP16IncomingRequestCommand.GET_DIAGNOSTICS,
-          error as Error,
-          { errorResponse: OCPP16Constants.OCPP_RESPONSE_EMPTY }
-        )!
+        return (
+          handleIncomingRequestError<GetDiagnosticsResponse>(
+            chargingStation,
+            OCPP16IncomingRequestCommand.GET_DIAGNOSTICS,
+            ensureError(error),
+            { errorResponse: OCPP16Constants.OCPP_RESPONSE_EMPTY }
+          ) ?? OCPP16Constants.OCPP_RESPONSE_EMPTY
+        )
       }
     } else {
-      logger.error(
+      logger.warn(
         `${chargingStation.logPrefix()} ${moduleName}.handleRequestGetDiagnostics: Unsupported protocol ${
           uri.protocol
         } to transfer the diagnostic logs archive`
@@ -1068,7 +1213,44 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
       >(chargingStation, OCPP16RequestCommand.DIAGNOSTICS_STATUS_NOTIFICATION, {
         status: OCPP16DiagnosticsStatus.UploadFailed,
       })
+      if (chargingStation.stationInfo != null) {
+        chargingStation.stationInfo.diagnosticsStatus = OCPP16DiagnosticsStatus.UploadFailed
+      }
       return OCPP16Constants.OCPP_RESPONSE_EMPTY
+    }
+  }
+
+  /**
+   * Handles OCPP 1.6 GetLocalListVersion request from central system.
+   * Returns the version number of the local authorization list.
+   * @param chargingStation - The charging station instance processing the request
+   * @returns GetLocalListVersionResponse with list version
+   */
+  private handleRequestGetLocalListVersion (
+    chargingStation: ChargingStation
+  ): OCPP16GetLocalListVersionResponse {
+    if (
+      !OCPP16ServiceUtils.checkFeatureProfile(
+        chargingStation,
+        OCPP16SupportedFeatureProfiles.LocalAuthListManagement,
+        OCPP16IncomingRequestCommand.GET_LOCAL_LIST_VERSION
+      )
+    ) {
+      return OCPP16Constants.OCPP_GET_LOCAL_LIST_VERSION_RESPONSE_NOT_SUPPORTED
+    }
+    try {
+      const authService = OCPPAuthServiceFactory.getInstance(chargingStation)
+      const manager = authService.getLocalAuthListManager()
+      if (manager == null) {
+        return OCPP16Constants.OCPP_GET_LOCAL_LIST_VERSION_RESPONSE_NOT_SUPPORTED
+      }
+      return { listVersion: manager.getVersion() }
+    } catch (error) {
+      logger.error(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestGetLocalListVersion: Error getting version:`,
+        error
+      )
+      return OCPP16Constants.OCPP_GET_LOCAL_LIST_VERSION_RESPONSE_NOT_SUPPORTED
     }
   }
 
@@ -1090,6 +1272,7 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
         connectorId++
       ) {
         if (
+          chargingStation.isConnectorAvailable(connectorId) &&
           chargingStation.getConnectorStatus(connectorId)?.transactionStarted === false &&
           !OCPP16ServiceUtils.hasReservation(chargingStation, connectorId, commandPayload.idTag)
         ) {
@@ -1102,13 +1285,23 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
           `${chargingStation.logPrefix()} ${moduleName}.handleRequestRemoteStartTransaction: Remote start transaction REJECTED on ${
             // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
             chargingStation.stationInfo?.chargingStationId
-          }, idTag '${commandPayload.idTag}': no available connector found`
+          }, idTag '${truncateId(commandPayload.idTag)}': no available connector found`
         )
         return OCPP16Constants.OCPP_RESPONSE_REJECTED
       }
     }
     const { chargingProfile, connectorId: transactionConnectorId, idTag } = commandPayload
     if (!chargingStation.hasConnector(transactionConnectorId)) {
+      return this.notifyRemoteStartTransactionRejected(
+        chargingStation,
+        transactionConnectorId,
+        idTag
+      )
+    }
+    if (
+      chargingStation.getConnectorStatus(transactionConnectorId)?.status ===
+      OCPP16ChargePointStatus.Finishing
+    ) {
       return this.notifyRemoteStartTransactionRejected(
         chargingStation,
         transactionConnectorId,
@@ -1128,10 +1321,11 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
     // idTag authorization check required
     if (
       chargingStation.getAuthorizeRemoteTxRequests() &&
-      !(await OCPPServiceUtils.isIdTagAuthorizedUnified(
+      !(await isIdTagAuthorized(
         chargingStation,
         transactionConnectorId,
-        idTag
+        idTag,
+        AuthContext.REMOTE_START
       ))
     ) {
       return this.notifyRemoteStartTransactionRejected(
@@ -1158,7 +1352,7 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
       `${chargingStation.logPrefix()} ${moduleName}.handleRequestRemoteStartTransaction: Remote start transaction ACCEPTED on ${
         // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
         chargingStation.stationInfo?.chargingStationId
-      }#${transactionConnectorId.toString()}, idTag '${idTag}'`
+      }#${transactionConnectorId.toString()}, idTag '${truncateId(idTag)}'`
     )
     return OCPP16Constants.OCPP_RESPONSE_ACCEPTED
   }
@@ -1193,12 +1387,11 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
     ) {
       return OCPP16Constants.OCPP_RESERVATION_RESPONSE_REJECTED
     }
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    commandPayload.expiryDate = convertToDate(commandPayload.expiryDate)!
+    commandPayload.expiryDate = convertToDate(commandPayload.expiryDate) ?? new Date()
     const { connectorId, idTag, reservationId } = commandPayload
     if (!chargingStation.hasConnector(connectorId)) {
-      logger.error(
-        `${chargingStation.logPrefix()} ${moduleName}.handleRequestReserveNow: Trying to reserve a non existing connector id ${connectorId.toString()}`
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestReserveNow: Trying to reserve a non-existent connector id ${connectorId.toString()}`
       )
       return OCPP16Constants.OCPP_RESERVATION_RESPONSE_REJECTED
     }
@@ -1208,11 +1401,13 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
     if (connectorId === 0 && !chargingStation.getReserveConnectorZeroSupported()) {
       return OCPP16Constants.OCPP_RESERVATION_RESPONSE_REJECTED
     }
-    if (!(await OCPPServiceUtils.isIdTagAuthorizedUnified(chargingStation, connectorId, idTag))) {
+    if (!(await isIdTagAuthorized(chargingStation, connectorId, idTag, AuthContext.RESERVATION))) {
       return OCPP16Constants.OCPP_RESERVATION_RESPONSE_REJECTED
     }
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    const connectorStatus = chargingStation.getConnectorStatus(connectorId)!
+    const connectorStatus = chargingStation.getConnectorStatus(connectorId)
+    if (connectorStatus == null) {
+      return OCPP16Constants.OCPP_RESERVATION_RESPONSE_REJECTED
+    }
     resetAuthorizeConnectorStatus(connectorStatus)
     let response: OCPP16ReserveNowResponse
     try {
@@ -1251,15 +1446,18 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
       }
       return response
     } catch (error) {
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      chargingStation.getConnectorStatus(connectorId)!.status = OCPP16ChargePointStatus.Available
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      return handleIncomingRequestError<OCPP16ReserveNowResponse>(
-        chargingStation,
-        OCPP16IncomingRequestCommand.RESERVE_NOW,
-        error as Error,
-        { errorResponse: OCPP16Constants.OCPP_RESERVATION_RESPONSE_FAULTED }
-      )!
+      const errorConnectorStatus = chargingStation.getConnectorStatus(connectorId)
+      if (errorConnectorStatus != null) {
+        errorConnectorStatus.status = OCPP16ChargePointStatus.Available
+      }
+      return (
+        handleIncomingRequestError<OCPP16ReserveNowResponse>(
+          chargingStation,
+          OCPP16IncomingRequestCommand.RESERVE_NOW,
+          ensureError(error),
+          { errorResponse: OCPP16Constants.OCPP_RESERVATION_RESPONSE_FAULTED }
+        ) ?? OCPP16Constants.OCPP_RESERVATION_RESPONSE_FAULTED
+      )
     }
   }
 
@@ -1274,16 +1472,102 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
     commandPayload: ResetRequest
   ): GenericResponse {
     const { type } = commandPayload
-    chargingStation
-      .reset(`${type}Reset` as OCPP16StopTransactionReason)
-      .catch(Constants.EMPTY_FUNCTION)
+    const reason = `${type}Reset` as OCPP16StopTransactionReason
+    const graceful = reason === OCPP16StopTransactionReason.SOFT_RESET
+    chargingStation.reset(reason, graceful).catch((error: unknown) => {
+      logger.error(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestReset: Reset error:`,
+        error
+      )
+    })
     logger.info(
       `${chargingStation.logPrefix()} ${moduleName}.handleRequestReset: ${type} reset request received, simulating it. The station will be back online in ${formatDurationMilliSeconds(
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        chargingStation.stationInfo!.resetTime!
+        chargingStation.stationInfo?.resetTime ?? 0
       )}`
     )
     return OCPP16Constants.OCPP_RESPONSE_ACCEPTED
+  }
+
+  private handleRequestSendLocalList (
+    chargingStation: ChargingStation,
+    commandPayload: OCPP16SendLocalListRequest
+  ): OCPP16SendLocalListResponse {
+    if (
+      !OCPP16ServiceUtils.checkFeatureProfile(
+        chargingStation,
+        OCPP16SupportedFeatureProfiles.LocalAuthListManagement,
+        OCPP16IncomingRequestCommand.SEND_LOCAL_LIST
+      )
+    ) {
+      return OCPP16Constants.OCPP_SEND_LOCAL_LIST_RESPONSE_NOT_SUPPORTED
+    }
+    try {
+      const authService = OCPPAuthServiceFactory.getInstance(chargingStation)
+      if (!chargingStation.getLocalAuthListEnabled()) {
+        return OCPP16Constants.OCPP_SEND_LOCAL_LIST_RESPONSE_NOT_SUPPORTED
+      }
+      const manager = authService.getLocalAuthListManager()
+      if (manager == null) {
+        return OCPP16Constants.OCPP_SEND_LOCAL_LIST_RESPONSE_NOT_SUPPORTED
+      }
+      if (commandPayload.listVersion <= 0) {
+        return OCPP16Constants.OCPP_SEND_LOCAL_LIST_RESPONSE_FAILED
+      }
+      const sendLocalListMaxLength = getConfigurationKey(
+        chargingStation,
+        OCPP16StandardParametersKey.SendLocalListMaxLength
+      )
+      if (sendLocalListMaxLength?.value != null) {
+        const maxLength = convertToIntOrNaN(sendLocalListMaxLength.value)
+        if (
+          Number.isInteger(maxLength) &&
+          maxLength > 0 &&
+          commandPayload.localAuthorizationList != null &&
+          commandPayload.localAuthorizationList.length > maxLength
+        ) {
+          return OCPP16Constants.OCPP_SEND_LOCAL_LIST_RESPONSE_FAILED
+        }
+      }
+      const { listVersion, localAuthorizationList, updateType } = commandPayload
+      if (updateType === OCPP16UpdateType.Full) {
+        const entries = (localAuthorizationList ?? []).map(item => ({
+          expiryDate:
+            item.idTagInfo?.expiryDate != null
+              ? convertToDate(item.idTagInfo.expiryDate)
+              : undefined,
+          identifier: item.idTag,
+          parentId: item.idTagInfo?.parentIdTag,
+          status: item.idTagInfo?.status ?? OCPP16AuthorizationStatus.INVALID,
+        }))
+        manager.setEntries(entries, listVersion)
+      } else {
+        // OCPP 1.6 §5.15: For differential updates, version must be greater than current
+        const currentVersion = manager.getVersion()
+        if (listVersion <= currentVersion) {
+          return OCPP16Constants.OCPP_SEND_LOCAL_LIST_RESPONSE_VERSION_MISMATCH
+        }
+        const diffEntries: DifferentialAuthEntry[] = (localAuthorizationList ?? []).map(item => ({
+          expiryDate:
+            item.idTagInfo?.expiryDate != null
+              ? convertToDate(item.idTagInfo.expiryDate)
+              : undefined,
+          identifier: item.idTag,
+          parentId: item.idTagInfo?.parentIdTag,
+          status: item.idTagInfo?.status,
+        }))
+        manager.applyDifferentialUpdate(diffEntries, listVersion)
+      }
+      logger.info(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestSendLocalList: Local auth list updated (${updateType}), version=${String(listVersion)}`
+      )
+      return OCPP16Constants.OCPP_SEND_LOCAL_LIST_RESPONSE_ACCEPTED
+    } catch (error) {
+      logger.error(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestSendLocalList: Error updating local auth list:`,
+        error
+      )
+      return OCPP16Constants.OCPP_SEND_LOCAL_LIST_RESPONSE_FAILED
+    }
   }
 
   private handleRequestSetChargingProfile (
@@ -1301,8 +1585,8 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
     }
     const { connectorId, csChargingProfiles } = commandPayload
     if (!chargingStation.hasConnector(connectorId)) {
-      logger.error(
-        `${chargingStation.logPrefix()} ${moduleName}.handleRequestSetChargingProfile: Trying to set charging profile(s) to a non existing connector id ${connectorId.toString()}`
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestSetChargingProfile: Trying to set charging profile(s) to a non-existent connector id ${connectorId.toString()}`
       )
       return OCPP16Constants.OCPP_SET_CHARGING_PROFILE_RESPONSE_REJECTED
     }
@@ -1317,7 +1601,7 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
       csChargingProfiles.chargingProfilePurpose === OCPP16ChargingProfilePurposeType.TX_PROFILE &&
       connectorId === 0
     ) {
-      logger.error(
+      logger.warn(
         `${chargingStation.logPrefix()} ${moduleName}.handleRequestSetChargingProfile: Trying to set transaction charging profile(s) on connector ${connectorId.toString()}`
       )
       return OCPP16Constants.OCPP_SET_CHARGING_PROFILE_RESPONSE_REJECTED
@@ -1328,7 +1612,7 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
       connectorId > 0 &&
       connectorStatus?.transactionStarted === false
     ) {
-      logger.error(
+      logger.warn(
         `${chargingStation.logPrefix()} ${moduleName}.handleRequestSetChargingProfile: Trying to set transaction charging profile(s) on connector ${connectorId.toString()} without a started transaction`
       )
       return OCPP16Constants.OCPP_SET_CHARGING_PROFILE_RESPONSE_REJECTED
@@ -1340,7 +1624,7 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
       csChargingProfiles.transactionId != null &&
       csChargingProfiles.transactionId !== connectorStatus.transactionId
     ) {
-      logger.error(
+      logger.warn(
         `${chargingStation.logPrefix()} ${moduleName}.handleRequestSetChargingProfile: Trying to set transaction charging profile(s) on connector ${connectorId.toString()} with a different transaction id ${
           csChargingProfiles.transactionId.toString()
           // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
@@ -1367,23 +1651,26 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
         OCPP16SupportedFeatureProfiles.RemoteTrigger,
         OCPP16IncomingRequestCommand.TRIGGER_MESSAGE
       ) ||
-      !OCPP16ServiceUtils.isMessageTriggerSupported(chargingStation, requestedMessage)
+      !isMessageTriggerSupported(chargingStation, requestedMessage)
     ) {
       return OCPP16Constants.OCPP_TRIGGER_MESSAGE_RESPONSE_NOT_IMPLEMENTED
     }
     if (
-      !OCPP16ServiceUtils.isConnectorIdValid(
+      connectorId != null &&
+      !isConnectorIdValid(
         chargingStation,
         OCPP16IncomingRequestCommand.TRIGGER_MESSAGE,
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        connectorId!
+        connectorId
       )
     ) {
       return OCPP16Constants.OCPP_TRIGGER_MESSAGE_RESPONSE_REJECTED
     }
     switch (requestedMessage) {
       case OCPP16MessageTrigger.BootNotification:
+      case OCPP16MessageTrigger.DiagnosticsStatusNotification:
+      case OCPP16MessageTrigger.FirmwareStatusNotification:
       case OCPP16MessageTrigger.Heartbeat:
+      case OCPP16MessageTrigger.MeterValues:
       case OCPP16MessageTrigger.StatusNotification:
         return OCPP16Constants.OCPP_TRIGGER_MESSAGE_RESPONSE_ACCEPTED
       default:
@@ -1397,19 +1684,20 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
   ): Promise<UnlockConnectorResponse> {
     const { connectorId } = commandPayload
     if (!chargingStation.hasConnector(connectorId)) {
-      logger.error(
-        `${chargingStation.logPrefix()} ${moduleName}.handleRequestUnlockConnector: Trying to unlock a non existing connector id ${connectorId.toString()}`
+      logger.warn(
+        `${chargingStation.logPrefix()} ${moduleName}.handleRequestUnlockConnector: Trying to unlock a non-existent connector id ${connectorId.toString()}`
       )
       return OCPP16Constants.OCPP_RESPONSE_UNLOCK_NOT_SUPPORTED
     }
     if (connectorId === 0) {
-      logger.error(
+      logger.warn(
         `${chargingStation.logPrefix()} ${moduleName}.handleRequestUnlockConnector: Trying to unlock connector id ${connectorId.toString()}`
       )
       return OCPP16Constants.OCPP_RESPONSE_UNLOCK_NOT_SUPPORTED
     }
     if (chargingStation.getConnectorStatus(connectorId)?.transactionStarted === true) {
-      const stopResponse = await chargingStation.stopTransactionOnConnector(
+      const stopResponse = await OCPP16ServiceUtils.stopTransactionOnConnector(
+        chargingStation,
         connectorId,
         OCPP16StopTransactionReason.UNLOCK_COMMAND
       )
@@ -1418,11 +1706,11 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
       }
       return OCPP16Constants.OCPP_RESPONSE_UNLOCK_FAILED
     }
-    await OCPP16ServiceUtils.sendAndSetConnectorStatus(
-      chargingStation,
+    await sendAndSetConnectorStatus(chargingStation, {
       connectorId,
-      OCPP16ChargePointStatus.Available
-    )
+      status: OCPP16ChargePointStatus.Available,
+    } as OCPP16StatusNotificationRequest)
+    chargingStation.unlockConnector(connectorId)
     return OCPP16Constants.OCPP_RESPONSE_UNLOCKED
   }
 
@@ -1442,25 +1730,16 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
       )
       return OCPP16Constants.OCPP_RESPONSE_EMPTY
     }
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    commandPayload.retrieveDate = convertToDate(commandPayload.retrieveDate)!
-    const { retrieveDate } = commandPayload
+    commandPayload.retrieveDate = convertToDate(commandPayload.retrieveDate) ?? new Date()
     if (
-      chargingStation.stationInfo?.firmwareStatus != null &&
-      chargingStation.stationInfo.firmwareStatus !== OCPP16FirmwareStatus.Installed
+      chargingStation.stationInfo?.firmwareStatus === OCPP16FirmwareStatus.Downloading ||
+      chargingStation.stationInfo?.firmwareStatus === OCPP16FirmwareStatus.Downloaded ||
+      chargingStation.stationInfo?.firmwareStatus === OCPP16FirmwareStatus.Installing
     ) {
       logger.warn(
         `${chargingStation.logPrefix()} ${moduleName}.handleRequestUpdateFirmware: Cannot simulate firmware update: firmware update is already in progress`
       )
       return OCPP16Constants.OCPP_RESPONSE_EMPTY
-    }
-    const now = Date.now()
-    if (retrieveDate.getTime() <= now) {
-      this.updateFirmwareSimulation(chargingStation).catch(Constants.EMPTY_FUNCTION)
-    } else {
-      setTimeout(() => {
-        this.updateFirmwareSimulation(chargingStation).catch(Constants.EMPTY_FUNCTION)
-      }, retrieveDate.getTime() - now)
     }
     return OCPP16Constants.OCPP_RESPONSE_EMPTY
   }
@@ -1475,7 +1754,7 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
       `${chargingStation.logPrefix()} ${moduleName}.notifyRemoteStartTransactionRejected: Remote start transaction REJECTED on ${
         // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
         chargingStation.stationInfo?.chargingStationId
-      }#${connectorId.toString()}, idTag '${idTag}', availability '${
+      }#${connectorId.toString()}, idTag '${truncateId(idTag)}', availability '${
         // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
         connectorStatus?.availability
         // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
@@ -1519,32 +1798,12 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
     if (!checkChargingStationState(chargingStation, chargingStation.logPrefix())) {
       return
     }
-    if (chargingStation.hasEvses) {
-      for (const [evseId, evseStatus] of chargingStation.evses) {
-        if (evseId > 0) {
-          for (const [connectorId, connectorStatus] of evseStatus.connectors) {
-            if (connectorStatus.transactionStarted === false) {
-              await OCPP16ServiceUtils.sendAndSetConnectorStatus(
-                chargingStation,
-                connectorId,
-                OCPP16ChargePointStatus.Unavailable
-              )
-            }
-          }
-        }
-      }
-    } else {
-      for (const connectorId of chargingStation.connectors.keys()) {
-        if (
-          connectorId > 0 &&
-          chargingStation.getConnectorStatus(connectorId)?.transactionStarted === false
-        ) {
-          await OCPP16ServiceUtils.sendAndSetConnectorStatus(
-            chargingStation,
-            connectorId,
-            OCPP16ChargePointStatus.Unavailable
-          )
-        }
+    for (const { connectorId, connectorStatus } of chargingStation.iterateConnectors(true)) {
+      if (connectorStatus.transactionStarted === false) {
+        await sendAndSetConnectorStatus(chargingStation, {
+          connectorId,
+          status: OCPP16ChargePointStatus.Unavailable,
+        } as OCPP16StatusNotificationRequest)
       }
     }
     await chargingStation.ocppRequestService.requestHandler<
@@ -1553,8 +1812,9 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
     >(chargingStation, OCPP16RequestCommand.FIRMWARE_STATUS_NOTIFICATION, {
       status: OCPP16FirmwareStatus.Downloading,
     })
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    chargingStation.stationInfo!.firmwareStatus = OCPP16FirmwareStatus.Downloading
+    if (chargingStation.stationInfo != null) {
+      chargingStation.stationInfo.firmwareStatus = OCPP16FirmwareStatus.Downloading
+    }
     if (
       chargingStation.stationInfo?.firmwareUpgrade?.failureStatus ===
       OCPP16FirmwareStatus.DownloadFailed
@@ -1577,8 +1837,9 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
     >(chargingStation, OCPP16RequestCommand.FIRMWARE_STATUS_NOTIFICATION, {
       status: OCPP16FirmwareStatus.Downloaded,
     })
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    chargingStation.stationInfo!.firmwareStatus = OCPP16FirmwareStatus.Downloaded
+    if (chargingStation.stationInfo != null) {
+      chargingStation.stationInfo.firmwareStatus = OCPP16FirmwareStatus.Downloaded
+    }
     let wasTransactionsStarted = false
     let transactionsStarted: boolean
     do {
@@ -1594,33 +1855,12 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
         transactionsStarted = true
         wasTransactionsStarted = true
       } else {
-        if (chargingStation.hasEvses) {
-          for (const [evseId, evseStatus] of chargingStation.evses) {
-            if (evseId > 0) {
-              for (const [connectorId, connectorStatus] of evseStatus.connectors) {
-                if (connectorStatus.status !== OCPP16ChargePointStatus.Unavailable) {
-                  await OCPP16ServiceUtils.sendAndSetConnectorStatus(
-                    chargingStation,
-                    connectorId,
-                    OCPP16ChargePointStatus.Unavailable
-                  )
-                }
-              }
-            }
-          }
-        } else {
-          for (const connectorId of chargingStation.connectors.keys()) {
-            if (
-              connectorId > 0 &&
-              chargingStation.getConnectorStatus(connectorId)?.status !==
-                OCPP16ChargePointStatus.Unavailable
-            ) {
-              await OCPP16ServiceUtils.sendAndSetConnectorStatus(
-                chargingStation,
-                connectorId,
-                OCPP16ChargePointStatus.Unavailable
-              )
-            }
+        for (const { connectorId, connectorStatus } of chargingStation.iterateConnectors(true)) {
+          if (connectorStatus.status !== OCPP16ChargePointStatus.Unavailable) {
+            await sendAndSetConnectorStatus(chargingStation, {
+              connectorId,
+              status: OCPP16ChargePointStatus.Unavailable,
+            } as OCPP16StatusNotificationRequest)
           }
         }
         transactionsStarted = false
@@ -1637,8 +1877,9 @@ export class OCPP16IncomingRequestService extends OCPPIncomingRequestService {
     >(chargingStation, OCPP16RequestCommand.FIRMWARE_STATUS_NOTIFICATION, {
       status: OCPP16FirmwareStatus.Installing,
     })
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    chargingStation.stationInfo!.firmwareStatus = OCPP16FirmwareStatus.Installing
+    if (chargingStation.stationInfo != null) {
+      chargingStation.stationInfo.firmwareStatus = OCPP16FirmwareStatus.Installing
+    }
     if (
       chargingStation.stationInfo?.firmwareUpgrade?.failureStatus ===
       OCPP16FirmwareStatus.InstallationFailed

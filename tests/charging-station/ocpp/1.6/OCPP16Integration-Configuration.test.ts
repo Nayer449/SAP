@@ -1,5 +1,5 @@
 /**
- * @file Tests for OCPP16 Integration — Configuration Management
+ * @file Tests for OCPP 1.6 Configuration Management integration
  * @see OCPP 1.6 — §5.4 ChangeConfiguration, §5.8 GetConfiguration
  * @description Multi-step integration tests verifying ChangeConfiguration → GetConfiguration
  *   roundtrips for OCPP 1.6 configuration management flows
@@ -13,8 +13,10 @@ import type {
   GetConfigurationRequest,
 } from '../../../../src/types/index.js'
 
-import { OCPP16StandardParametersKey } from '../../../../src/types/index.js'
-import { OCPP16ConfigurationStatus } from '../../../../src/types/ocpp/1.6/Responses.js'
+import {
+  OCPP16ConfigurationStatus,
+  OCPP16StandardParametersKey,
+} from '../../../../src/types/index.js'
 import { standardCleanup } from '../../../helpers/TestLifecycleHelpers.js'
 import {
   createOCPP16IncomingRequestTestContext,
@@ -237,7 +239,10 @@ await describe('OCPP16 Integration — Configuration Management', async () => {
     const getResponse = testableService.handleRequestGetConfiguration(station, {})
 
     // Assert — All visible keys returned with correct values
-    assert.ok(getResponse.configurationKey.length >= 3)
+    assert.ok(
+      getResponse.configurationKey.length >= 3,
+      'should return at least 3 configuration keys'
+    )
     assert.strictEqual(getResponse.unknownKey.length, 0)
 
     const heartbeat = getResponse.configurationKey.find(

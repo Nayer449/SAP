@@ -1,13 +1,17 @@
 import type { IncomingMessage } from 'node:http'
 import type { Duplex } from 'node:stream'
 
-import { StatusCodes } from 'http-status-codes'
+import { getReasonPhrase, StatusCodes } from 'http-status-codes'
 import { type RawData, WebSocket, WebSocketServer } from 'ws'
+
+import type { IBootstrap } from '../IBootstrap.js'
 
 import {
   MapStringifyFormat,
+  type ProtocolNotification,
   type ProtocolRequest,
   type ProtocolResponse,
+  ServerNotification,
   type UIServerConfiguration,
   WebSocketCloseEventStatusCode,
 } from '../../types/index.js'
@@ -18,7 +22,10 @@ import {
   validateUUID,
 } from '../../utils/index.js'
 import { AbstractUIServer } from './AbstractUIServer.js'
-import { DEFAULT_COMPRESSION_THRESHOLD, DEFAULT_MAX_PAYLOAD_SIZE } from './UIServerSecurity.js'
+import {
+  DEFAULT_COMPRESSION_THRESHOLD_BYTES,
+  DEFAULT_MAX_PAYLOAD_SIZE_BYTES,
+} from './UIServerSecurity.js'
 import {
   getProtocolAndVersion,
   handleProtocols,
@@ -27,23 +34,44 @@ import {
 
 const moduleName = 'UIWebSocketServer'
 
+// Pre-handshake WS rejections write raw HTTP/1.1 to the Duplex socket;
+// AbstractUIServer.renderDenial targets ServerResponse and is not applicable.
+const buildUpgradeRejectionResponse = (
+  status: StatusCodes,
+  reasonPhrase: string,
+  extraHeaders: Readonly<Record<string, string>> = {}
+): string => {
+  const headers: Readonly<Record<string, string>> = {
+    'Content-Length': '0',
+    ...extraHeaders,
+    Connection: 'close',
+  }
+  const headerLines = Object.entries(headers)
+    .map(([name, value]) => `${name}: ${value}`)
+    .join('\r\n')
+  return `HTTP/1.1 ${status.toString()} ${reasonPhrase}\r\n${headerLines}\r\n\r\n`
+}
+
 export class UIWebSocketServer extends AbstractUIServer {
   protected override readonly uiServerType = 'UI WebSocket Server'
 
   private readonly webSocketServer: WebSocketServer
 
-  public constructor (protected override readonly uiServerConfiguration: UIServerConfiguration) {
-    super(uiServerConfiguration)
+  public constructor (
+    protected override readonly uiServerConfiguration: UIServerConfiguration,
+    bootstrap: IBootstrap
+  ) {
+    super(uiServerConfiguration, bootstrap)
     this.webSocketServer = new WebSocketServer({
       handleProtocols,
-      maxPayload: DEFAULT_MAX_PAYLOAD_SIZE,
+      maxPayload: DEFAULT_MAX_PAYLOAD_SIZE_BYTES,
       noServer: true,
       perMessageDeflate: {
         clientNoContextTakeover: true,
         concurrencyLimit: 10,
         serverMaxWindowBits: 12,
         serverNoContextTakeover: true,
-        threshold: DEFAULT_COMPRESSION_THRESHOLD,
+        threshold: DEFAULT_COMPRESSION_THRESHOLD_BYTES,
         zlibDeflateOptions: {
           chunkSize: 16 * 1024,
           level: 6,
@@ -154,14 +182,6 @@ export class UIWebSocketServer extends AbstractUIServer {
         }
       })
     })
-    this.httpServer.on('connect', (req: IncomingMessage, socket: Duplex, _head: Buffer) => {
-      const connectionHeader = req.headers.connection ?? ''
-      const upgradeHeader = req.headers.upgrade ?? ''
-      if (!/upgrade/i.test(connectionHeader) || !/^websocket$/i.test(upgradeHeader)) {
-        socket.write(`HTTP/1.1 ${StatusCodes.BAD_REQUEST.toString()} Bad Request\r\n\r\n`)
-        socket.destroy()
-      }
-    })
     this.httpServer.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
       const onSocketError = (error: Error): void => {
         logger.error(
@@ -173,29 +193,68 @@ export class UIWebSocketServer extends AbstractUIServer {
         )
       }
       socket.on('error', onSocketError)
-      this.authenticate(req, err => {
-        socket.removeListener('error', onSocketError)
-        if (err != null) {
-          socket.write(`HTTP/1.1 ${StatusCodes.UNAUTHORIZED.toString()} Unauthorized\r\n\r\n`)
-          socket.destroy()
-          return
-        }
-        try {
-          this.webSocketServer.handleUpgrade(req, socket, head, (ws: WebSocket) => {
-            this.webSocketServer.emit('connection', ws, req)
-          })
-        } catch (error) {
-          logger.error(
-            `${this.logPrefix(
-              moduleName,
-              'start.httpServer.on.upgrade'
-            )} Error at connection upgrade event handling:`,
-            error
-          )
-        }
-      })
+
+      const connectionHeader = req.headers.connection ?? ''
+      const upgradeHeader = req.headers.upgrade ?? ''
+      if (!/upgrade/i.test(connectionHeader) || !/^websocket$/i.test(upgradeHeader)) {
+        socket.write(
+          buildUpgradeRejectionResponse(
+            StatusCodes.BAD_REQUEST,
+            getReasonPhrase(StatusCodes.BAD_REQUEST)
+          ),
+          () => {
+            socket.destroy()
+          }
+        )
+        return
+      }
+
+      const prologue = this.runRequestPrologue(req)
+      if (!prologue.ok) {
+        socket.write(
+          buildUpgradeRejectionResponse(prologue.status, prologue.reasonPhrase, prologue.headers),
+          () => {
+            socket.destroy()
+          }
+        )
+        return
+      }
+
+      if (!this.authenticate(req)) {
+        const unauthorized = this.getUnauthorizedDenial()
+        socket.write(
+          buildUpgradeRejectionResponse(
+            unauthorized.status,
+            unauthorized.reasonPhrase,
+            unauthorized.headers
+          ),
+          () => {
+            socket.destroy()
+          }
+        )
+        return
+      }
+      socket.removeListener('error', onSocketError)
+      try {
+        this.webSocketServer.handleUpgrade(req, socket, head, (ws: WebSocket) => {
+          this.webSocketServer.emit('connection', ws, req)
+        })
+      } catch (error) {
+        logger.error(
+          `${this.logPrefix(
+            moduleName,
+            'start.httpServer.on.upgrade'
+          )} Error at connection upgrade event handling:`,
+          error
+        )
+      }
     })
     this.startHttpServer()
+  }
+
+  protected override notifyClients (): void {
+    const notification: ProtocolNotification = [ServerNotification.REFRESH]
+    this.broadcastToClients(JSON.stringify(notification))
   }
 
   private broadcastToClients (message: string): void {

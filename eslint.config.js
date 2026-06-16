@@ -6,95 +6,23 @@ import perfectionist from 'eslint-plugin-perfectionist'
 import pluginVue from 'eslint-plugin-vue'
 import { defineConfig } from 'eslint/config'
 import neostandard, { plugins } from 'neostandard'
+import vueParser from 'vue-eslint-parser'
+
+const GLOB_TS = ['**/*.ts', '**/*.tsx', '**/*.mts', '**/*.cts']
+const GLOB_TS_VUE = [...GLOB_TS, '**/*.vue']
+const GLOB_JS = ['**/*.js', '**/*.mjs', '**/*.cjs']
 
 export default defineConfig([
   {
     ignores: ['**/dist/**'],
   },
+
+  // Base configs
+
   cspellConfigs.recommended,
   {
     rules: {
-      '@cspell/spellchecker': [
-        'warn',
-        {
-          autoFix: true,
-          cspell: {
-            words: [
-              'DECI',
-              'CENTI',
-              'MILLI',
-              'MILLIWATT',
-              'Benoit',
-              'chargingstations',
-              'ctrlr',
-              'csms',
-              'idtag',
-              'idtags',
-              'iccid',
-              'imsi',
-              'ocpp',
-              'onconnection',
-              'evse',
-              'evses',
-              'kvar',
-              'kvarh',
-              'varh',
-              'rfid',
-              'workerset',
-              'logform',
-              'mnemonist',
-              'poolifier',
-              'measurand',
-              'measurands',
-              'mikro',
-              'neostandard',
-              'recurrency',
-              'shutdowning',
-              'VCAP',
-              'workerd',
-              'yxxx',
-              // OCPP 2.0.x domain terms
-              'cppwm',
-              'heartbeatinterval',
-              'HEARTBEATINTERVAL',
-              'websocketpinginterval',
-              'WEBSOCKETPINGINTERVAL',
-              'connectionurl',
-              'CONNECTIONURL',
-              'chargingstation',
-              'CHARGINGSTATION',
-              'authctrlr',
-              'AUTHCTRLR',
-              'recloser',
-              'deauthorize',
-              'DEAUTHORIZE',
-              'deauthorized',
-              'DEAUTHORIZED',
-              'Deauthorization',
-              'Selftest',
-              'SECC',
-              'Secc',
-              'Overcurrent',
-              'ocsp',
-              'OCSP',
-              'EMAID',
-              'emaid',
-              'IDTOKEN',
-              'idtoken',
-              'issuerkeyhash',
-              'issuernamehash',
-              // OCPP SRPC (Simple Remote Procedure Call) message types
-              'SRPC',
-              'CALLRESULT',
-              'CALLERROR',
-              'CALLRESULTERROR',
-              'reservability',
-              // VPN protocol acronyms
-              'PPTP',
-            ],
-          },
-        },
-      ],
+      '@cspell/spellchecker': ['warn', { autoFix: true }],
     },
   },
   js.configs.recommended,
@@ -112,38 +40,72 @@ export default defineConfig([
       ],
     },
   },
+
+  // neostandard
+
+  ...neostandard({ ts: true }),
+
+  // Vue
+
   ...pluginVue.configs['flat/recommended'],
-  {
-    files: ['**/*.vue'],
-    languageOptions: {
-      globals: {
-        localStorage: 'readonly',
-      },
-      parserOptions: {
-        parser: '@typescript-eslint/parser',
-      },
-    },
-  },
+
+  // TypeScript
+
   ...plugins['typescript-eslint'].config(
     {
       extends: [
         ...plugins['typescript-eslint'].configs.strictTypeChecked,
         ...plugins['typescript-eslint'].configs.stylisticTypeChecked,
       ],
-      files: ['**/*.ts', '**/*.tsx', '**/*.mts', '**/*.cts', '*/**.vue'],
+      files: GLOB_TS_VUE,
       languageOptions: {
         parserOptions: {
+          extraFileExtensions: ['.vue'],
           projectService: true,
           // eslint-disable-next-line n/no-unsupported-features/node-builtins
           tsconfigRootDir: import.meta.dirname,
         },
       },
+      rules: {
+        '@typescript-eslint/consistent-type-imports': [
+          'error',
+          { fixStyle: 'separate-type-imports', prefer: 'type-imports' },
+        ],
+      },
     },
     {
-      files: ['**/*.js', '**/*.mjs', '**/*.cjs'],
+      files: ['**/*.d.ts'],
+      rules: {
+        '@typescript-eslint/consistent-type-imports': 'off',
+      },
+    },
+    {
+      files: GLOB_JS,
       ...plugins['typescript-eslint'].configs.disableTypeChecked,
     }
   ),
+
+  // Vue parser restoration
+
+  {
+    files: ['**/*.vue'],
+    languageOptions: {
+      globals: {
+        localStorage: 'readonly',
+      },
+      parser: vueParser,
+      parserOptions: {
+        extraFileExtensions: ['.vue'],
+        parser: plugins['typescript-eslint'].parser,
+        projectService: true,
+        // eslint-disable-next-line n/no-unsupported-features/node-builtins
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+  },
+
+  // Perfectionist
+
   perfectionist.configs['recommended-natural'],
   {
     files: ['**/*.vue'],
@@ -151,9 +113,24 @@ export default defineConfig([
       'perfectionist/sort-vue-attributes': 'off',
     },
   },
-  ...neostandard({
-    ts: true,
-  }),
+
+  // Rule overrides
+
+  {
+    files: GLOB_TS_VUE,
+    rules: {
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          args: 'none',
+          caughtErrors: 'none',
+          ignoreRestSiblings: true,
+          vars: 'all',
+          varsIgnorePattern: '^_',
+        },
+      ],
+    },
+  },
   {
     files: [
       'src/charging-station/Bootstrap.ts',
@@ -180,16 +157,16 @@ export default defineConfig([
     },
   },
   {
-    files: ['ui/web/src/components/Container.vue', 'ui/web/src/components/buttons/Button.vue'],
-    rules: {
-      'vue/multi-word-component-names': 'off',
-    },
-  },
-  {
     files: ['tests/**/*.test.ts', 'tests/**/*.test.mts', 'tests/**/*.test.cts'],
     rules: {
       '@typescript-eslint/no-floating-promises': ['error', { ignoreVoid: true }],
       'no-void': 'off',
+    },
+  },
+  {
+    files: ['ui/web/tests/**/*.test.ts'],
+    rules: {
+      'vue/order-in-components': 'off',
     },
   },
 ])

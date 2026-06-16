@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![GitHub Clones](https://img.shields.io/badge/dynamic/json?color=brightgreen&label=Clone&query=count&url=https://gist.githubusercontent.com/jerome-benoit/c7c669b881d5b27dc0b44a639504ff93/raw/clone.json&logo=github)](https://github.com/SAP/e-mobility-charging-stations-simulator/graphs/traffic)
+[![GitHub Clones](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/jerome-benoit/c7c669b881d5b27dc0b44a639504ff93/raw/clone.json&logo=github)](https://github.com/SAP/e-mobility-charging-stations-simulator/graphs/traffic)
 [![GitHub commit activity (main)](https://img.shields.io/github/commit-activity/m/SAP/e-mobility-charging-stations-simulator/main?color=brightgreen&logo=github)](https://github.com/SAP/e-mobility-charging-stations-simulator/graphs/commit-activity)
 [![CI workflow](https://github.com/SAP/e-mobility-charging-stations-simulator/actions/workflows/ci.yml/badge.svg)](https://github.com/SAP/e-mobility-charging-stations-simulator/actions/workflows/ci.yml)
 [![REUSE status](https://api.reuse.software/badge/github.com/SAP/e-mobility-charging-stations-simulator)](https://api.reuse.software/info/github.com/SAP/e-mobility-charging-stations-simulator)
@@ -32,6 +32,7 @@ Simple [node.js](https://nodejs.org/) software to simulate and scale a set of ch
 - [Initial configuration](#initial-configuration)
 - [Start simulator](#start-simulator)
 - [Start Web UI](#start-web-ui)
+- [Start CLI](#start-cli)
 - [Configuration files syntax](#configuration-files-syntax)
   - [Charging stations simulator configuration](#charging-stations-simulator-configuration)
   - [Charging station template configuration](#charging-station-template-configuration)
@@ -44,8 +45,9 @@ Simple [node.js](https://nodejs.org/) software to simulate and scale a set of ch
   - [Version 1.6](#version-16-1)
   - [Version 2.0.x](#version-20x-1)
 - [UI Protocol](#ui-protocol)
+  - [MCP Protocol](#mcp-protocol-model-context-protocol)
   - [WebSocket Protocol](#websocket-protocol)
-  - [HTTP Protocol](#http-protocol)
+  - [HTTP Protocol (deprecated)](#http-protocol-deprecated)
 - [Support, Feedback, Contributing](#support-feedback-contributing)
 - [Code of Conduct](#code-of-conduct)
 - [Licensing](#licensing)
@@ -132,6 +134,10 @@ pnpm start
 
 See Web UI [README.md](./ui/web/README.md) for more information.
 
+## Start CLI
+
+See CLI [README.md](./ui/cli/README.md) for more information.
+
 ## Configuration files syntax
 
 All configuration files are using the JSON standard syntax.
@@ -167,15 +173,17 @@ But the modifications to test have to be done to the files in the build target d
 
 **src/assets/config.json**:
 
-| Key                        | Value(s)                                     | Default Value                                                                                                                                                                                                                 | Value type                                                                                                                                                                                                                                                                      | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| -------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| supervisionUrls            |                                              | []                                                                                                                                                                                                                            | string \| string[]                                                                                                                                                                                                                                                              | string or strings array containing global connection URIs to OCPP-J servers                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| supervisionUrlDistribution | round-robin/random/charging-station-affinity | charging-station-affinity                                                                                                                                                                                                     | string                                                                                                                                                                                                                                                                          | supervision urls distribution policy to simulated charging stations                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| log                        |                                              | {<br />"enabled": true,<br />"file": "logs/combined.log",<br />"errorFile": "logs/error.log",<br />"statisticsInterval": 60,<br />"level": "info",<br />"console": false,<br />"format": "simple",<br />"rotate": true<br />} | {<br />enabled?: boolean;<br />file?: string;<br />errorFile?: string;<br />statisticsInterval?: number;<br />level?: string;<br />console?: boolean;<br />format?: string;<br />rotate?: boolean;<br />maxFiles?: string \| number;<br />maxSize?: string \| number;<br />}    | Log configuration section:<br />- _enabled_: enable logging<br />- _file_: log file relative path<br />- _errorFile_: error log file relative path<br />- _statisticsInterval_: seconds between charging stations statistics output in the logs<br />- _level_: emerg/alert/crit/error/warning/notice/info/debug [winston](https://github.com/winstonjs/winston) logging level</br >- _console_: output logs on the console<br />- _format_: [winston](https://github.com/winstonjs/winston) log format<br />- _rotate_: enable daily log files rotation<br />- _maxFiles_: maximum number of log files: https://github.com/winstonjs/winston-daily-rotate-file#options<br />- _maxSize_: maximum size of log files in bytes, or units of kb, mb, and gb: https://github.com/winstonjs/winston-daily-rotate-file#options                                                                                        |
-| worker                     |                                              | {<br />"processType": "workerSet",<br />"startDelay": 500,<br />"elementAddDelay": 0,<br />"elementsPerWorker": 'auto',<br />"poolMinSize": 4,<br />"poolMaxSize": 16<br />}                                                  | {<br />processType?: WorkerProcessType;<br />startDelay?: number;<br />elementAddDelay?: number;<br />elementsPerWorker?: number \| 'auto' \| 'all';<br />poolMinSize?: number;<br />poolMaxSize?: number;<br />resourceLimits?: ResourceLimits;<br />}                         | Worker configuration section:<br />- _processType_: worker threads process type (`workerSet`/`fixedPool`/`dynamicPool`)<br />- _startDelay_: milliseconds to wait at worker threads startup (only for `workerSet` worker threads process type)<br />- _elementAddDelay_: milliseconds to wait between charging station add<br />- _elementsPerWorker_: number of charging stations per worker threads for the `workerSet` process type (`auto` means (number of stations) / (number of CPUs) \* 1.5 if (number of stations) > (number of CPUs), otherwise 1; `all` means a unique worker will run all charging stations)<br />- _poolMinSize_: worker threads pool minimum number of threads</br >- _poolMaxSize_: worker threads pool maximum number of threads<br />- _resourceLimits_: worker threads [resource limits](https://nodejs.org/api/worker_threads.html#new-workerfilename-options) object option |
-| uiServer                   |                                              | {<br />"enabled": false,<br />"type": "ws",<br />"version": "1.1",<br />"options": {<br />"host": "localhost",<br />"port": 8080<br />}<br />}                                                                                | {<br />enabled?: boolean;<br />type?: ApplicationProtocol;<br />version?: ApplicationProtocolVersion;<br />options?: ServerOptions;<br />authentication?: {<br />enabled: boolean;<br />type: AuthenticationType;<br />username?: string;<br />password?: string;<br />}<br />} | UI server configuration section:<br />- _enabled_: enable UI server<br />- _type_: 'http' or 'ws'<br />- _version_: HTTP version '1.1' or '2.0'<br />- _options_: node.js net module [listen options](https://nodejs.org/api/net.html#serverlistenoptions-callback)<br />- _authentication_: authentication type configuration section                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| performanceStorage         |                                              | {<br />"enabled": true,<br />"type": "none",<br />}                                                                                                                                                                           | {<br />enabled?: boolean;<br />type?: string;<br />uri?: string;<br />}                                                                                                                                                                                                         | Performance storage configuration section:<br />- _enabled_: enable performance storage<br />- _type_: 'jsonfile', 'mongodb' or 'none'<br />- _uri_: storage URI                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| stationTemplateUrls        |                                              | {}[]                                                                                                                                                                                                                          | {<br />file: string;<br />numberOfStations: number;<br />provisionedNumberOfStations?: number;<br />}[]                                                                                                                                                                         | array of charging station templates URIs configuration section:<br />- _file_: charging station configuration template file relative path<br />- _numberOfStations_: template number of stations at startup<br />- _provisionedNumberOfStations_: template provisioned number of stations after startup                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Key                        | Value(s)                                     | Default Value                                                                                                                                                                                                                                                                                                                        | Value type                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| -------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| $schemaVersion             | 1                                            | 1                                                                                                                                                                                                                                                                                                                                    | integer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Configuration schema version. Set to 1. Files without this field are migrated from v0; deprecated keys are remapped on every load.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| supervisionUrls            |                                              | []                                                                                                                                                                                                                                                                                                                                   | string \| string[]                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | string or strings array containing global connection URIs to OCPP-J servers                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| supervisionUrlDistribution | round-robin/random/charging-station-affinity | charging-station-affinity                                                                                                                                                                                                                                                                                                            | string                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | supervision urls distribution policy to simulated charging stations                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| log                        |                                              | {<br />"enabled": true,<br />"file": "logs/combined.log",<br />"errorFile": "logs/error.log",<br />"statisticsInterval": 60,<br />"level": "info",<br />"console": false,<br />"format": "simple",<br />"rotate": true<br />}                                                                                                        | {<br />enabled?: boolean;<br />file?: string;<br />errorFile?: string;<br />statisticsInterval?: number;<br />level?: string;<br />console?: boolean;<br />format?: string;<br />rotate?: boolean;<br />maxFiles?: string \| number;<br />maxSize?: string \| number;<br />}                                                                                                                                                                                                            | Log configuration section:<br />- _enabled_: enable logging<br />- _file_: log file relative path<br />- _errorFile_: error log file relative path<br />- _statisticsInterval_: seconds between charging stations statistics output in the logs<br />- _level_: emerg/alert/crit/error/warning/notice/info/debug [winston](https://github.com/winstonjs/winston) logging level</br >- _console_: output logs on the console<br />- _format_: [winston](https://github.com/winstonjs/winston) log format<br />- _rotate_: enable daily log files rotation<br />- _maxFiles_: maximum number of log files: https://github.com/winstonjs/winston-daily-rotate-file#options<br />- _maxSize_: maximum size of log files in bytes, or units of kb, mb, and gb: https://github.com/winstonjs/winston-daily-rotate-file#options                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| worker                     |                                              | {<br />"processType": "workerSet",<br />"startDelay": 500,<br />"elementAddDelay": 0,<br />"elementsPerWorker": 'auto',<br />"poolMinSize": 4,<br />"poolMaxSize": 16<br />}                                                                                                                                                         | {<br />processType?: WorkerProcessType;<br />startDelay?: number;<br />elementAddDelay?: number;<br />elementsPerWorker?: number \| 'auto' \| 'all';<br />poolMinSize?: number;<br />poolMaxSize?: number;<br />resourceLimits?: ResourceLimits;<br />}                                                                                                                                                                                                                                 | Worker configuration section:<br />- _processType_: worker threads process type (`workerSet`/`fixedPool`/`dynamicPool`)<br />- _startDelay_: milliseconds to wait at worker threads startup (only for `workerSet` worker threads process type)<br />- _elementAddDelay_: milliseconds to wait between charging station add<br />- _elementsPerWorker_: number of charging stations per worker threads for the `workerSet` process type (`auto` means (number of stations) / (number of CPUs) \* 1.5 if (number of stations) > (number of CPUs), otherwise 1; `all` means a unique worker will run all charging stations)<br />- _poolMinSize_: worker threads pool minimum number of threads</br >- _poolMaxSize_: worker threads pool maximum number of threads<br />- _resourceLimits_: worker threads [resource limits](https://nodejs.org/api/worker_threads.html#new-workerfilename-options) object option                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| uiServer                   |                                              | {<br />"enabled": false,<br />"type": "ws",<br />"version": "1.1",<br />"accessPolicy": {<br />"requireTlsForNonLoopback": true,<br />"trustedProxies": [],<br />"allowLoopbackProxy": false,<br />"allowedHosts": [],<br />"allowedOrigins": []<br />},<br />"options": {<br />"host": "localhost",<br />"port": 8080<br />}<br />} | {<br />enabled?: boolean;<br />type?: ApplicationProtocol;<br />version?: ApplicationProtocolVersion;<br />accessPolicy?: {<br />requireTlsForNonLoopback?: boolean;<br />trustedProxies?: string[];<br />allowLoopbackProxy?: boolean;<br />allowedHosts?: string[];<br />allowedOrigins?: string[];<br />};<br />options?: ServerOptions;<br />authentication?: {<br />enabled: boolean;<br />type: AuthenticationType;<br />username?: string;<br />password?: string;<br />}<br />} | UI server configuration section:<br />- _enabled_: enable UI server<br />- _type_: 'ws', 'mcp' or 'http' (deprecated)<br />- _version_: HTTP version '1.1' or '2.0' (ws and mcp transports only support '1.1')<br />- _accessPolicy_: gateway access policy. Loopback request sources are allowed in plaintext; non-loopback sources require TLS termination by a reverse proxy:<br />&nbsp;&nbsp;- _requireTlsForNonLoopback_: reject non-loopback plaintext requests; the check honors `X-Forwarded-Proto` or `Forwarded: proto=` from a trusted proxy, non-loopback requests without forwarded protocol headers are denied as `tls-required`<br />&nbsp;&nbsp;- _trustedProxies_: IPv4 or IPv6 literals of the immediate reverse proxies whose forwarded headers are honored (hostnames and CIDR ranges are not accepted; only single-hop forwarded chains are honored); a compromised entry can bypass per-client rate limiting by varying `X-Forwarded-For`<br />&nbsp;&nbsp;- _allowLoopbackProxy_: accept forwarded headers when the immediate peer is loopback AND listed in _trustedProxies_ (e.g. `['127.0.0.1', '::1']`)<br />&nbsp;&nbsp;- _allowedHosts_: explicit Host header allowlist; mitigates DNS rebinding when the UI server is exposed through a browser-facing host<br />&nbsp;&nbsp;- _allowedOrigins_: explicit Origin header allowlist; when empty, the request Origin's URL hostname falls back to matching against _allowedHosts_<br />- _options_: node.js net module [listen options](https://nodejs.org/api/net.html#serverlistenoptions-callback)<br />- _authentication_: authentication type configuration section |
+| performanceStorage         |                                              | {<br />"enabled": true,<br />"type": "none",<br />}                                                                                                                                                                                                                                                                                  | {<br />enabled?: boolean;<br />type?: string;<br />uri?: string;<br />}                                                                                                                                                                                                                                                                                                                                                                                                                 | Performance storage configuration section:<br />- _enabled_: enable performance storage<br />- _type_: 'jsonfile', 'mongodb' or 'none'<br />- _uri_: storage URI                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| stationTemplateUrls        |                                              | {}[]                                                                                                                                                                                                                                                                                                                                 | {<br />file: string;<br />numberOfStations: number;<br />provisionedNumberOfStations?: number;<br />}[]                                                                                                                                                                                                                                                                                                                                                                                 | array of charging station templates URIs configuration section:<br />- _file_: charging station configuration template file relative path<br />- _numberOfStations_: template number of stations at startup<br />- _provisionedNumberOfStations_: template provisioned number of stations after startup                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| persistState               | true/false                                   | true                                                                                                                                                                                                                                                                                                                                 | boolean                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | persist the simulator stopped state to `dist/assets/configurations/.simulator-state.json`. On the next process startup, if the simulator was stopped via the UI procedure `stopSimulator`, charging stations are not auto-spawned and the user can recover via the `startSimulator` procedure. Signal-driven shutdowns (SIGINT/SIGTERM/SIGQUIT) and configuration-reload restarts do not modify the persisted state. The feature requires `uiServer.enabled` to be `true`; otherwise it is silently ignored (no recovery channel without UI). Set the environment variable `SIMULATOR_COLD_START=true` for one run to ignore the persisted state and force a cold start. UI-added charging stations beyond `numberOfStations` are not auto-respawned                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 #### Worker process model
 
@@ -192,64 +200,69 @@ But the modifications to test have to be done to the files in the build target d
 
 **src/assets/station-templates/\<name\>.json**:
 
-| Key                                                  | Value(s)      | Default Value                                                                                                                      | Value type                                                                                                                                                                    | Description                                                                                                                                                                                                                                  |
-| ---------------------------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| supervisionUrls                                      |               | []                                                                                                                                 | string \| string[]                                                                                                                                                            | string or strings array containing connection URIs to OCPP-J servers                                                                                                                                                                         |
-| supervisionUser                                      |               | undefined                                                                                                                          | string                                                                                                                                                                        | basic HTTP authentication user to OCPP-J server                                                                                                                                                                                              |
-| supervisionPassword                                  |               | undefined                                                                                                                          | string                                                                                                                                                                        | basic HTTP authentication password to OCPP-J server                                                                                                                                                                                          |
-| supervisionUrlOcppConfiguration                      | true/false    | false                                                                                                                              | boolean                                                                                                                                                                       | enable supervision URL configuration via a vendor OCPP parameter key                                                                                                                                                                         |
-| supervisionUrlOcppKey                                |               | 'ConnectionUrl'                                                                                                                    | string                                                                                                                                                                        | the vendor string that will be used as a vendor OCPP parameter key to set the supervision URL                                                                                                                                                |
-| autoStart                                            | true/false    | true                                                                                                                               | boolean                                                                                                                                                                       | enable automatic start of added charging station from template                                                                                                                                                                               |
-| ocppVersion                                          | 1.6/2.0/2.0.1 | 1.6                                                                                                                                | string                                                                                                                                                                        | OCPP version                                                                                                                                                                                                                                 |
-| ocppProtocol                                         | json          | json                                                                                                                               | string                                                                                                                                                                        | OCPP protocol                                                                                                                                                                                                                                |
-| ocppStrictCompliance                                 | true/false    | true                                                                                                                               | boolean                                                                                                                                                                       | enable strict adherence to the OCPP version and protocol specifications with OCPP commands PDU validation against [OCA](https://www.openchargealliance.org/) JSON schemas                                                                    |
-| ocppPersistentConfiguration                          | true/false    | true                                                                                                                               | boolean                                                                                                                                                                       | enable persistent OCPP parameters storage by charging stations 'hashId'. The persistency is ensured by the charging stations configuration files in [dist/assets/configurations](./dist/assets/configurations)                               |
-| stationInfoPersistentConfiguration                   | true/false    | true                                                                                                                               | boolean                                                                                                                                                                       | enable persistent station information and specifications storage by charging stations 'hashId'. The persistency is ensured by the charging stations configuration files in [dist/assets/configurations](./dist/assets/configurations)        |
-| automaticTransactionGeneratorPersistentConfiguration | true/false    | true                                                                                                                               | boolean                                                                                                                                                                       | enable persistent automatic transaction generator configuration storage by charging stations 'hashId'. The persistency is ensured by the charging stations configuration files in [dist/assets/configurations](./dist/assets/configurations) |
-| wsOptions                                            |               | {}                                                                                                                                 | ClientOptions & ClientRequestArgs                                                                                                                                             | [ws](https://github.com/websockets/ws) and node.js [http](https://nodejs.org/api/http.html) clients options intersection                                                                                                                     |
-| idTagsFile                                           |               | undefined                                                                                                                          | string                                                                                                                                                                        | RFID tags list file relative to [src/assets](./src/assets) path                                                                                                                                                                              |
-| baseName                                             |               | undefined                                                                                                                          | string                                                                                                                                                                        | base name to build charging stations id                                                                                                                                                                                                      |
-| nameSuffix                                           |               | undefined                                                                                                                          | string                                                                                                                                                                        | name suffix to build charging stations id                                                                                                                                                                                                    |
-| fixedName                                            | true/false    | false                                                                                                                              | boolean                                                                                                                                                                       | use the 'baseName' as the charging stations unique name                                                                                                                                                                                      |
-| chargePointModel                                     |               | undefined                                                                                                                          | string                                                                                                                                                                        | charging stations model                                                                                                                                                                                                                      |
-| chargePointVendor                                    |               | undefined                                                                                                                          | string                                                                                                                                                                        | charging stations vendor                                                                                                                                                                                                                     |
-| chargePointSerialNumberPrefix                        |               | undefined                                                                                                                          | string                                                                                                                                                                        | charge point serial number prefix                                                                                                                                                                                                            |
-| chargeBoxSerialNumberPrefix                          |               | undefined                                                                                                                          | string                                                                                                                                                                        | charge box serial number prefix (deprecated since OCPP 1.6)                                                                                                                                                                                  |
-| firmwareVersionPattern                               |               | Semantic versioning regular expression: https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string | string                                                                                                                                                                        | charging stations firmware version pattern                                                                                                                                                                                                   |
-| firmwareVersion                                      |               | undefined                                                                                                                          | string                                                                                                                                                                        | charging stations firmware version                                                                                                                                                                                                           |
-| power                                                |               |                                                                                                                                    | float \| float[]                                                                                                                                                              | charging stations maximum power value(s)                                                                                                                                                                                                     |
-| powerSharedByConnectors                              | true/false    | false                                                                                                                              | boolean                                                                                                                                                                       | charging stations power shared by its connectors                                                                                                                                                                                             |
-| powerUnit                                            | W/kW          | W                                                                                                                                  | string                                                                                                                                                                        | charging stations power unit                                                                                                                                                                                                                 |
-| currentOutType                                       | AC/DC         | AC                                                                                                                                 | string                                                                                                                                                                        | charging stations current out type                                                                                                                                                                                                           |
-| voltageOut                                           |               | AC:230/DC:400                                                                                                                      | integer                                                                                                                                                                       | charging stations voltage out                                                                                                                                                                                                                |
-| numberOfPhases                                       | 0/1/3         | AC:3/DC:0                                                                                                                          | integer                                                                                                                                                                       | charging stations number of phase(s)                                                                                                                                                                                                         |
-| numberOfConnectors                                   |               |                                                                                                                                    | integer \| integer[]                                                                                                                                                          | charging stations number of connector(s)                                                                                                                                                                                                     |
-| useConnectorId0                                      | true/false    | true                                                                                                                               | boolean                                                                                                                                                                       | use connector id 0 definition from the charging station configuration template                                                                                                                                                               |
-| randomConnectors                                     | true/false    | false                                                                                                                              | boolean                                                                                                                                                                       | randomize runtime connector id affectation from the connector id definition in charging station configuration template                                                                                                                       |
-| resetTime                                            |               | 60                                                                                                                                 | integer                                                                                                                                                                       | seconds to wait before the charging stations come back at reset                                                                                                                                                                              |
-| autoRegister                                         | true/false    | false                                                                                                                              | boolean                                                                                                                                                                       | set charging stations as registered at boot notification for testing purpose                                                                                                                                                                 |
-| autoReconnectMaxRetries                              |               | -1 (unlimited)                                                                                                                     | integer                                                                                                                                                                       | connection retries to the OCPP-J server                                                                                                                                                                                                      |
-| reconnectExponentialDelay                            | true/false    | false                                                                                                                              | boolean                                                                                                                                                                       | connection delay retry to the OCPP-J server                                                                                                                                                                                                  |
-| registrationMaxRetries                               |               | -1 (unlimited)                                                                                                                     | integer                                                                                                                                                                       | charging stations boot notification retries                                                                                                                                                                                                  |
-| amperageLimitationOcppKey                            |               | undefined                                                                                                                          | string                                                                                                                                                                        | charging stations OCPP parameter key used to set the amperage limit, per phase for each connector on AC and global for DC                                                                                                                    |
-| amperageLimitationUnit                               | A/cA/dA/mA    | A                                                                                                                                  | string                                                                                                                                                                        | charging stations amperage limit unit                                                                                                                                                                                                        |
-| enableStatistics                                     | true/false    | false                                                                                                                              | boolean                                                                                                                                                                       | enable charging stations statistics                                                                                                                                                                                                          |
-| remoteAuthorization                                  | true/false    | true                                                                                                                               | boolean                                                                                                                                                                       | enable RFID tags remote authorization                                                                                                                                                                                                        |
-| beginEndMeterValues                                  | true/false    | false                                                                                                                              | boolean                                                                                                                                                                       | enable Transaction.{Begin,End} MeterValues                                                                                                                                                                                                   |
-| outOfOrderEndMeterValues                             | true/false    | false                                                                                                                              | boolean                                                                                                                                                                       | send Transaction.End MeterValues out of order. Need to relax OCPP specifications strict compliance ('ocppStrictCompliance' parameter)                                                                                                        |
-| meteringPerTransaction                               | true/false    | true                                                                                                                               | boolean                                                                                                                                                                       | enable metering history on a per transaction basis                                                                                                                                                                                           |
-| transactionDataMeterValues                           | true/false    | false                                                                                                                              | boolean                                                                                                                                                                       | enable transaction data MeterValues at stop transaction                                                                                                                                                                                      |
-| stopTransactionsOnStopped                            | true/false    | true                                                                                                                               | boolean                                                                                                                                                                       | enable stop transactions on charging station stop                                                                                                                                                                                            |
-| mainVoltageMeterValues                               | true/false    | true                                                                                                                               | boolean                                                                                                                                                                       | include charging stations main voltage MeterValues on three phased charging stations                                                                                                                                                         |
-| phaseLineToLineVoltageMeterValues                    | true/false    | false                                                                                                                              | boolean                                                                                                                                                                       | include charging stations line to line voltage MeterValues on three phased charging stations                                                                                                                                                 |
-| customValueLimitationMeterValues                     | true/false    | true                                                                                                                               | boolean                                                                                                                                                                       | enable limitation on custom fluctuated value in MeterValues                                                                                                                                                                                  |
-| firmwareUpgrade                                      |               | {<br />"versionUpgrade": {<br />"step": 1<br />},<br />"reset": true<br />}                                                        | {<br />versionUpgrade?: {<br />patternGroup?: number;<br />step?: number;<br />};<br />reset?: boolean;<br />failureStatus?: 'DownloadFailed' \| 'InstallationFailed';<br />} | Configuration section for simulating firmware upgrade support.                                                                                                                                                                               |
-| commandsSupport                                      |               | {<br />"incomingCommands": {},<br />"outgoingCommands": {}<br />}                                                                  | {<br /> incomingCommands: Record<IncomingRequestCommand, boolean>;<br />outgoingCommands?: Record<RequestCommand, boolean>;<br />}                                            | Configuration section for OCPP commands support. Empty section or subsections means all implemented OCPP commands are supported                                                                                                              |
-| messageTriggerSupport                                |               | {}                                                                                                                                 | Record<MessageTrigger, boolean>                                                                                                                                               | Configuration section for OCPP commands trigger support. Empty section means all implemented OCPP trigger commands are supported                                                                                                             |
-| Configuration                                        |               |                                                                                                                                    | ChargingStationOcppConfiguration                                                                                                                                              | charging stations OCPP parameters configuration section                                                                                                                                                                                      |
-| AutomaticTransactionGenerator                        |               |                                                                                                                                    | AutomaticTransactionGeneratorConfiguration                                                                                                                                    | charging stations ATG configuration section                                                                                                                                                                                                  |
-| Connectors                                           |               |                                                                                                                                    | Record<string, ConnectorStatus>                                                                                                                                               | charging stations connectors configuration section                                                                                                                                                                                           |
-| Evses                                                |               |                                                                                                                                    | Record<string, EvseTemplate>                                                                                                                                                  | charging stations EVSEs configuration section                                                                                                                                                                                                |
+| Key                                                  | Value(s)      | Default Value                                                                                                                      | Value type                                                                                                                                                                    | Description                                                                                                                                                                                                                                       |
+| ---------------------------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| supervisionUrls                                      |               | []                                                                                                                                 | string \| string[]                                                                                                                                                            | string or strings array containing connection URIs to OCPP-J servers                                                                                                                                                                              |
+| supervisionUser                                      |               | undefined                                                                                                                          | string                                                                                                                                                                        | basic HTTP authentication user to OCPP-J server                                                                                                                                                                                                   |
+| supervisionPassword                                  |               | undefined                                                                                                                          | string                                                                                                                                                                        | basic HTTP authentication password to OCPP-J server                                                                                                                                                                                               |
+| supervisionUrlOcppConfiguration                      | true/false    | false                                                                                                                              | boolean                                                                                                                                                                       | enable supervision URL configuration via a vendor OCPP parameter key                                                                                                                                                                              |
+| supervisionUrlOcppKey                                |               | 'ConnectionUrl'                                                                                                                    | string                                                                                                                                                                        | the vendor string that will be used as a vendor OCPP parameter key to set the supervision URL                                                                                                                                                     |
+| autoStart                                            | true/false    | true                                                                                                                               | boolean                                                                                                                                                                       | enable automatic start of added charging station from template                                                                                                                                                                                    |
+| ocppVersion                                          | 1.6/2.0/2.0.1 | 1.6                                                                                                                                | string                                                                                                                                                                        | OCPP version                                                                                                                                                                                                                                      |
+| ocppProtocol                                         | json          | json                                                                                                                               | string                                                                                                                                                                        | OCPP protocol                                                                                                                                                                                                                                     |
+| ocppStrictCompliance                                 | true/false    | true                                                                                                                               | boolean                                                                                                                                                                       | enable strict adherence to the OCPP version and protocol specifications with OCPP commands PDU validation against [OCA](https://www.openchargealliance.org/) JSON schemas                                                                         |
+| ocppPersistentConfiguration                          | true/false    | true                                                                                                                               | boolean                                                                                                                                                                       | enable persistent OCPP parameters storage by charging stations 'hashId'. The persistency is ensured by the charging stations configuration files in [dist/assets/configurations](./dist/assets/configurations)                                    |
+| stationInfoPersistentConfiguration                   | true/false    | true                                                                                                                               | boolean                                                                                                                                                                       | enable persistent station information and specifications storage by charging stations 'hashId'. The persistency is ensured by the charging stations configuration files in [dist/assets/configurations](./dist/assets/configurations)             |
+| automaticTransactionGeneratorPersistentConfiguration | true/false    | true                                                                                                                               | boolean                                                                                                                                                                       | enable persistent automatic transaction generator configuration storage by charging stations 'hashId'. The persistency is ensured by the charging stations configuration files in [dist/assets/configurations](./dist/assets/configurations)      |
+| wsOptions                                            |               | {}                                                                                                                                 | ClientOptions & ClientRequestArgs                                                                                                                                             | [ws](https://github.com/websockets/ws) and node.js [http](https://nodejs.org/api/http.html) clients options intersection                                                                                                                          |
+| idTagsFile                                           |               | undefined                                                                                                                          | string                                                                                                                                                                        | RFID tags list file relative to [src/assets](./src/assets) path                                                                                                                                                                                   |
+| iccid                                                |               | undefined                                                                                                                          | string                                                                                                                                                                        | SIM card ICCID                                                                                                                                                                                                                                    |
+| imsi                                                 |               | undefined                                                                                                                          | string                                                                                                                                                                        | SIM card IMSI                                                                                                                                                                                                                                     |
+| baseName                                             |               | undefined                                                                                                                          | string                                                                                                                                                                        | base name to build charging stations id                                                                                                                                                                                                           |
+| nameSuffix                                           |               | undefined                                                                                                                          | string                                                                                                                                                                        | name suffix to build charging stations id                                                                                                                                                                                                         |
+| fixedName                                            | true/false    | false                                                                                                                              | boolean                                                                                                                                                                       | use the 'baseName' as the charging stations unique name                                                                                                                                                                                           |
+| chargePointModel                                     |               | undefined                                                                                                                          | string                                                                                                                                                                        | charging stations model                                                                                                                                                                                                                           |
+| chargePointVendor                                    |               | undefined                                                                                                                          | string                                                                                                                                                                        | charging stations vendor                                                                                                                                                                                                                          |
+| chargePointSerialNumberPrefix                        |               | undefined                                                                                                                          | string                                                                                                                                                                        | charge point serial number prefix                                                                                                                                                                                                                 |
+| chargeBoxSerialNumberPrefix                          |               | undefined                                                                                                                          | string                                                                                                                                                                        | charge box serial number prefix (deprecated since OCPP 1.6)                                                                                                                                                                                       |
+| meterSerialNumberPrefix                              |               | undefined                                                                                                                          | string                                                                                                                                                                        | meter serial number prefix                                                                                                                                                                                                                        |
+| meterType                                            |               | undefined                                                                                                                          | string                                                                                                                                                                        | meter type                                                                                                                                                                                                                                        |
+| firmwareVersionPattern                               |               | Semantic versioning regular expression: https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string | string                                                                                                                                                                        | charging stations firmware version pattern                                                                                                                                                                                                        |
+| firmwareVersion                                      |               | undefined                                                                                                                          | string                                                                                                                                                                        | charging stations firmware version                                                                                                                                                                                                                |
+| power                                                |               |                                                                                                                                    | float \| float[]                                                                                                                                                              | charging stations maximum power value(s)                                                                                                                                                                                                          |
+| powerSharedByConnectors                              | true/false    | false                                                                                                                              | boolean                                                                                                                                                                       | charging stations power shared by its connectors. When true, any single connector can draw up to the full station power; when false, each connector is allocated an equal share                                                                   |
+| powerUnit                                            | W/kW          | W                                                                                                                                  | string                                                                                                                                                                        | charging stations power unit                                                                                                                                                                                                                      |
+| currentOutType                                       | AC/DC         | AC                                                                                                                                 | string                                                                                                                                                                        | charging stations current out type                                                                                                                                                                                                                |
+| voltageOut                                           |               | AC:230/DC:400                                                                                                                      | integer                                                                                                                                                                       | charging stations voltage out                                                                                                                                                                                                                     |
+| numberOfPhases                                       | 0/1/3         | AC:3/DC:0                                                                                                                          | integer                                                                                                                                                                       | charging stations number of phase(s)                                                                                                                                                                                                              |
+| numberOfConnectors                                   |               |                                                                                                                                    | integer \| integer[]                                                                                                                                                          | charging stations number of connector(s)                                                                                                                                                                                                          |
+| useConnectorId0                                      | true/false    | true                                                                                                                               | boolean                                                                                                                                                                       | use connector id 0 definition from the charging station configuration template                                                                                                                                                                    |
+| randomConnectors                                     | true/false    | false                                                                                                                              | boolean                                                                                                                                                                       | randomize runtime connector id affectation from the connector id definition in charging station configuration template                                                                                                                            |
+| resetTime                                            |               | 60                                                                                                                                 | integer                                                                                                                                                                       | seconds to wait before the charging stations come back at reset                                                                                                                                                                                   |
+| autoRegister                                         | true/false    | false                                                                                                                              | boolean                                                                                                                                                                       | set charging stations as registered at boot notification for testing purpose                                                                                                                                                                      |
+| autoReconnectMaxRetries                              |               | -1 (unlimited)                                                                                                                     | integer                                                                                                                                                                       | connection retries to the OCPP-J server                                                                                                                                                                                                           |
+| reconnectExponentialDelay                            | true/false    | false                                                                                                                              | boolean                                                                                                                                                                       | connection delay retry to the OCPP-J server                                                                                                                                                                                                       |
+| registrationMaxRetries                               |               | -1 (unlimited)                                                                                                                     | integer                                                                                                                                                                       | charging stations boot notification retries                                                                                                                                                                                                       |
+| amperageLimitationOcppKey                            |               | undefined                                                                                                                          | string                                                                                                                                                                        | charging stations OCPP parameter key used to set the amperage limit, per phase for each connector on AC and global for DC                                                                                                                         |
+| amperageLimitationUnit                               | A/cA/dA/mA    | A                                                                                                                                  | string                                                                                                                                                                        | charging stations amperage limit unit                                                                                                                                                                                                             |
+| enableStatistics                                     | true/false    | false                                                                                                                              | boolean                                                                                                                                                                       | enable charging stations statistics                                                                                                                                                                                                               |
+| remoteAuthorization                                  | true/false    | true                                                                                                                               | boolean                                                                                                                                                                       | enable RFID tags remote authorization                                                                                                                                                                                                             |
+| beginEndMeterValues                                  | true/false    | false                                                                                                                              | boolean                                                                                                                                                                       | enable Transaction.{Begin,End} MeterValues                                                                                                                                                                                                        |
+| outOfOrderEndMeterValues                             | true/false    | false                                                                                                                              | boolean                                                                                                                                                                       | send Transaction.End MeterValues out of order. Need to relax OCPP specifications strict compliance ('ocppStrictCompliance' parameter)                                                                                                             |
+| meteringPerTransaction                               | true/false    | true                                                                                                                               | boolean                                                                                                                                                                       | enable metering history on a per transaction basis                                                                                                                                                                                                |
+| transactionDataMeterValues                           | true/false    | false                                                                                                                              | boolean                                                                                                                                                                       | enable transaction data MeterValues at stop transaction                                                                                                                                                                                           |
+| stopTransactionsOnStopped                            | true/false    | true                                                                                                                               | boolean                                                                                                                                                                       | enable stop transactions on charging station stop                                                                                                                                                                                                 |
+| postTransactionDelay                                 | ≥ 0           | 0                                                                                                                                  | integer                                                                                                                                                                       | seconds to wait after transaction stop before transitioning connector to Available. Simulates cable-unplug delay. In OCPP 1.6 the connector stays in Finishing state; in OCPP 2.0.x it stays Occupied. 0 = immediate Available (default behavior) |
+| mainVoltageMeterValues                               | true/false    | true                                                                                                                               | boolean                                                                                                                                                                       | include charging stations main voltage MeterValues on three phased charging stations                                                                                                                                                              |
+| phaseLineToLineVoltageMeterValues                    | true/false    | false                                                                                                                              | boolean                                                                                                                                                                       | include charging stations line to line voltage MeterValues on three phased charging stations                                                                                                                                                      |
+| customValueLimitationMeterValues                     | true/false    | true                                                                                                                               | boolean                                                                                                                                                                       | enable limitation on custom fluctuated value in MeterValues                                                                                                                                                                                       |
+| firmwareUpgrade                                      |               | {<br />"versionUpgrade": {<br />"step": 1<br />},<br />"reset": true<br />}                                                        | {<br />versionUpgrade?: {<br />patternGroup?: number;<br />step?: number;<br />};<br />reset?: boolean;<br />failureStatus?: 'DownloadFailed' \| 'InstallationFailed';<br />} | Configuration section for simulating firmware upgrade support.                                                                                                                                                                                    |
+| commandsSupport                                      |               | {<br />"incomingCommands": {},<br />"outgoingCommands": {}<br />}                                                                  | {<br /> incomingCommands: Record<IncomingRequestCommand, boolean>;<br />outgoingCommands?: Record<RequestCommand, boolean>;<br />}                                            | Configuration section for OCPP commands support. Empty section or subsections means all implemented OCPP commands are supported                                                                                                                   |
+| messageTriggerSupport                                |               | {}                                                                                                                                 | Record<MessageTrigger, boolean>                                                                                                                                               | Configuration section for OCPP commands trigger support. Empty section means all implemented OCPP trigger commands are supported                                                                                                                  |
+| Configuration                                        |               |                                                                                                                                    | ChargingStationOcppConfiguration                                                                                                                                              | charging stations OCPP parameters configuration section                                                                                                                                                                                           |
+| AutomaticTransactionGenerator                        |               |                                                                                                                                    | AutomaticTransactionGeneratorConfiguration                                                                                                                                    | charging stations ATG configuration section                                                                                                                                                                                                       |
+| Connectors                                           |               |                                                                                                                                    | Record<string, ConnectorStatus>                                                                                                                                               | charging stations connectors configuration section                                                                                                                                                                                                |
+| Evses                                                |               |                                                                                                                                    | Record<string, EvseTemplate>                                                                                                                                                  | charging stations EVSEs configuration section                                                                                                                                                                                                     |
 
 #### Configuration section syntax example
 
@@ -319,6 +332,7 @@ type AutomaticTransactionGeneratorConfiguration = {
     "0": {},
     "1": {
       "bootStatus": "Available",
+      "maximumPower": 50000,
       "MeterValues": [
         ...
         {
@@ -346,6 +360,50 @@ type AutomaticTransactionGeneratorConfiguration = {
 
 #### Evses section syntax example
 
+`MeterValues` can be defined at EVSE level or at connector level. EVSE-level definitions apply to all connectors of the EVSE and override connector-level definitions.
+
+##### MeterValues at EVSE level
+
+```json
+  "Evses": {
+    "0": {
+      "Connectors": {
+        "0": {}
+      }
+    },
+    "1": {
+      "MeterValues": [
+        ...
+        {
+          "unit": "W",
+          "measurand": "Power.Active.Import",
+          "phase": "L1-N",
+          "value": "5000",
+          "fluctuationPercent": "10"
+        },
+        ...
+        {
+          "unit": "A",
+          "measurand": "Current.Import",
+          "minimum": "0.5"
+        },
+        ...
+        {
+          "unit": "Wh"
+        },
+        ...
+      ],
+      "Connectors": {
+        "1": {
+          "bootStatus": "Available"
+        }
+      }
+    }
+  },
+```
+
+##### MeterValues at connector level
+
 ```json
   "Evses": {
     "0": {
@@ -357,6 +415,7 @@ type AutomaticTransactionGeneratorConfiguration = {
       "Connectors": {
         "1": {
           "bootStatus": "Available",
+          "maximumPower": 22080,
           "MeterValues": [
             ...
             {
@@ -434,6 +493,8 @@ In the [docker](./docker) folder:
 make
 ```
 
+The bundled Docker Compose configuration publishes the UI server on host loopback only (`127.0.0.1:8080:8080`) and disables `requireTlsForNonLoopback` for this local-only plaintext path. To expose the UI through a public host or reverse proxy, keep `requireTlsForNonLoopback` enabled and set `uiServer.accessPolicy.allowedHosts`, `allowedOrigins`, and `trustedProxies` in `docker/config.json` accordingly.
+
 <!-- Or with the optional git submodules:
 
 ```shell
@@ -472,8 +533,8 @@ make SUBMODULES_INIT=true
 
 #### Local Auth List Management Profile
 
-- :x: GetLocalListVersion
-- :x: SendLocalList
+- :white_check_mark: GetLocalListVersion
+- :white_check_mark: SendLocalList
 
 #### Reservation Profile
 
@@ -492,8 +553,6 @@ make SUBMODULES_INIT=true
 
 ### Version 2.0.x
 
-> **Note**: OCPP 2.0.x Core profile mandatory commands are now implemented.
-
 #### A. Security
 
 - :white_check_mark: SecurityEventNotification
@@ -507,14 +566,16 @@ make SUBMODULES_INIT=true
 - :white_check_mark: SetNetworkProfile
 - :white_check_mark: SetVariables
 
+> **Note**: `SetNetworkProfile` validates and accepts valid requests but does not persist the connection profile data (B09.FR.01).
+
 #### C. Authorization
 
 - :white_check_mark: ClearCache
 
 #### D. LocalAuthorizationListManagement
 
-- :x: GetLocalListVersion
-- :x: SendLocalList
+- :white_check_mark: GetLocalListVersion
+- :white_check_mark: SendLocalList
 
 #### E. Transactions
 
@@ -556,14 +617,12 @@ make SUBMODULES_INIT=true
 - :white_check_mark: InstallCertificate
 - :white_check_mark: SignCertificate
 
-> **Note**: Certificate management implementation limitations:
->
-> - **Mock CSR generation**: The `SignCertificate` command generates a mock Certificate Signing Request (CSR) for simulation purposes. In production, this should be replaced with actual cryptographic CSR generation.
-> - **OCSP stub**: Online Certificate Status Protocol (OCSP) validation is stubbed and returns `Failed` status. Full OCSP integration requires external OCSP responder configuration.
+> **Note**: Certificate hierarchy verification required by A02.FR.06 is not implemented; only validity period is checked.
 
 #### N. CustomerInformation
 
 - :white_check_mark: CustomerInformation
+- :white_check_mark: NotifyCustomerInformation
 
 #### P. DataTransfer
 
@@ -607,8 +666,8 @@ All kind of OCPP parameters are supported in charging station configuration or c
 #### Local Auth List Management Profile
 
 - :white_check_mark: LocalAuthListEnabled (type: boolean) (units: -)
-- :x: LocalAuthListMaxLength (type: integer) (units: -)
-- :x: SendLocalListMaxLength (type: integer) (units: -)
+- :white_check_mark: LocalAuthListMaxLength (type: integer) (units: -)
+- :white_check_mark: SendLocalListMaxLength (type: integer) (units: -)
 
 #### Reservation Profile
 
@@ -625,25 +684,266 @@ All kind of OCPP parameters are supported in charging station configuration or c
 
 - _none_
 
+#### Vendor-specific Configuration Keys
+
+- :white_check_mark: AlignedDataSignReadings (type: boolean) (units: -) **(vendor-specific)**
+- :white_check_mark: AlignedDataSignUpdatedReadings (type: boolean) (units: -) **(vendor-specific)**
+- :white_check_mark: MeterPublicKey[ConnectorID] (type: string) (units: -) **(vendor-specific)**
+- :white_check_mark: PublicKeyWithSignedMeterValue (type: optionlist) (units: -) **(vendor-specific)**
+- :white_check_mark: SampledDataSignReadings (type: boolean) (units: -) **(vendor-specific)**
+- :white_check_mark: SampledDataSignStartedReadings (type: boolean) (units: -) **(vendor-specific)**
+- :white_check_mark: SampledDataSignUpdatedReadings (type: boolean) (units: -) **(vendor-specific)**
+- :white_check_mark: SigningMethod (type: string) (units: -) **(vendor-specific)**
+- :white_check_mark: StartTxnSampledData (type: memberlist) (units: -) **(vendor-specific)**
+
 ### Version 2.0.x
 
-- :white_check_mark: GetVariables
-- :white_check_mark: SetVariables
+#### AlignedDataCtrlr
+
+- :white_check_mark: Available (type: boolean) (units: -)
+- :white_check_mark: Enabled (type: boolean) (units: -)
+- :white_check_mark: Interval (type: integer) (units: seconds)
+- :white_check_mark: Measurands (type: memberlist) (units: -)
+- :white_check_mark: SendDuringIdle (type: boolean) (units: -)
+- :white_check_mark: SignReadings (type: boolean) (units: -)
+- :white_check_mark: SignUpdatedReadings (type: boolean) (units: -) **(vendor-specific)**
+- :white_check_mark: TxEndedInterval (type: integer) (units: seconds)
+- :white_check_mark: TxEndedMeasurands (type: memberlist) (units: -)
+
+#### AuthCacheCtrlr
+
+- :white_check_mark: Available (type: boolean) (units: -)
+- :white_check_mark: DisablePostAuthorize (type: boolean) (units: -)
+- :white_check_mark: Enabled (type: boolean) (units: -)
+- :white_check_mark: LifeTime (type: integer) (units: -)
+- :white_check_mark: Policy (type: optionlist) (units: -)
+- :white_check_mark: Storage (type: integer) (units: -)
+
+#### AuthCtrlr
+
+- :white_check_mark: AdditionalInfoItemsPerMessage (type: integer) (units: -)
+- :white_check_mark: AuthorizeRemoteStart (type: boolean) (units: -)
+- :white_check_mark: DisableRemoteAuthorization (type: boolean) (units: -)
+- :white_check_mark: Enabled (type: boolean) (units: -)
+- :white_check_mark: LocalAuthorizationOffline (type: boolean) (units: -)
+- :white_check_mark: LocalPreAuthorization (type: boolean) (units: -)
+- :white_check_mark: MasterPassGroupId (type: string) (units: -)
+- :white_check_mark: OfflineTxForUnknownIdEnabled (type: boolean) (units: -)
+
+#### CHAdeMOCtrlr
+
+- :white_check_mark: AutoManufacturerCode (type: integer) (units: -)
+- :white_check_mark: CHAdeMOProtocolNumber (type: integer) (units: -)
+- :white_check_mark: DynamicControl (type: boolean) (units: -)
+- :white_check_mark: HighCurrentControl (type: boolean) (units: -)
+- :white_check_mark: HighVoltageControl (type: boolean) (units: -)
+- :white_check_mark: SelftestActive (type: boolean) (units: -)
+- :white_check_mark: VehicleStatus (type: boolean) (units: -)
+
+#### ChargingStation
+
+- :white_check_mark: AllowNewSessionsPendingFirmwareUpdate (type: boolean) (units: -)
+- :white_check_mark: AvailabilityState (type: optionlist) (units: -)
+- :white_check_mark: Available (type: boolean) (units: -)
+- :white_check_mark: ConnectionUrl (type: string) (units: -) **(vendor-specific)**
+- :white_check_mark: Model (type: string) (units: -)
+- :white_check_mark: SupplyPhases (type: integer) (units: -)
+- :white_check_mark: VendorName (type: string) (units: -)
+- :white_check_mark: WebSocketPingInterval (type: integer) (units: seconds)
+
+#### ClockCtrlr
+
+- :white_check_mark: DateTime (type: datetime) (units: -)
+- :white_check_mark: NextTimeOffsetTransitionDateTime (type: datetime) (units: -)
+- :white_check_mark: NtpServerUri (type: string) (units: -)
+- :white_check_mark: NtpSource (type: optionlist) (units: -)
+- :white_check_mark: TimeAdjustmentReportingThreshold (type: integer) (units: -)
+- :white_check_mark: TimeOffset (type: string) (units: -)
+- :white_check_mark: TimeSource (type: sequencelist) (units: -)
+- :white_check_mark: TimeZone (type: string) (units: -)
+
+#### DeviceDataCtrlr
+
+- :white_check_mark: BytesPerMessage (type: integer) (units: -)
+- :white_check_mark: ConfigurationValueSize (type: integer) (units: characters)
+- :white_check_mark: ItemsPerMessage (type: integer) (units: -)
+- :white_check_mark: ReportingValueSize (type: integer) (units: characters)
+- :white_check_mark: ValueSize (type: integer) (units: characters)
+
+#### DisplayMessageCtrlr
+
+- :white_check_mark: DisplayMessages (type: integer) (units: -)
+- :white_check_mark: SupportedFormats (type: memberlist) (units: -)
+- :white_check_mark: SupportedPriorities (type: memberlist) (units: -)
+
+#### EVSE
+
+- :white_check_mark: AllowReset (type: boolean) (units: -)
+- :white_check_mark: AvailabilityState (type: optionlist) (units: -)
+- :white_check_mark: Available (type: boolean) (units: -)
+- :white_check_mark: EvseId (type: string) (units: -)
+- :white_check_mark: ISO15118EvseId (type: string) (units: -)
+- :white_check_mark: Power (type: decimal) (units: W)
+- :white_check_mark: SupplyPhases (type: integer) (units: -)
+
+#### FirmwareCtrlr
+
+- :white_check_mark: SimulateSignatureVerificationFailure (type: boolean) (units: -) **(vendor-specific)**
+
+#### FiscalMetering
+
+- :white_check_mark: PublicKey (type: string) (units: -) **(vendor-specific)**
+- :white_check_mark: SigningMethod (type: string) (units: -) **(vendor-specific)**
+
+#### ISO15118Ctrlr
+
+- :white_check_mark: CentralContractValidationAllowed (type: boolean) (units: -)
+- :white_check_mark: ContractCertificateInstallationEnabled (type: boolean) (units: -)
+- :white_check_mark: ContractValidationOffline (type: boolean) (units: -)
+- :white_check_mark: CountryName (type: string) (units: -)
+- :white_check_mark: MaxScheduleEntries (type: integer) (units: -)
+- :white_check_mark: PnCEnabled (type: boolean) (units: -)
+- :white_check_mark: RequestMeteringReceipt (type: boolean) (units: -)
+- :white_check_mark: RequestedEnergyTransferMode (type: optionlist) (units: -)
+- :white_check_mark: SeccId (type: string) (units: -)
+- :white_check_mark: V2GCertificateInstallationEnabled (type: boolean) (units: -)
+
+#### LocalAuthListCtrlr
+
+- :white_check_mark: Available (type: boolean) (units: -)
+- :white_check_mark: BytesPerMessage (type: integer) (units: -)
+- :white_check_mark: DisablePostAuthorize (type: boolean) (units: -)
+- :white_check_mark: Enabled (type: boolean) (units: -)
+- :white_check_mark: Entries (type: integer) (units: -)
+- :white_check_mark: ItemsPerMessage (type: integer) (units: -)
+- :white_check_mark: Storage (type: integer) (units: -)
+
+#### MonitoringCtrlr
+
+- :white_check_mark: ActiveMonitoringBase (type: optionlist) (units: -)
+- :white_check_mark: ActiveMonitoringLevel (type: integer) (units: -)
+- :white_check_mark: Available (type: boolean) (units: -)
+- :white_check_mark: BytesPerMessage (type: integer) (units: -)
+- :white_check_mark: Enabled (type: boolean) (units: -)
+- :white_check_mark: ItemsPerMessage (type: integer) (units: -)
+- :white_check_mark: MonitoringBase (type: optionlist) (units: -)
+- :white_check_mark: MonitoringLevel (type: integer) (units: -)
+- :white_check_mark: OfflineQueuingSeverity (type: integer) (units: -)
+
+#### OCPPCommCtrlr
+
+- :white_check_mark: ActiveNetworkProfile (type: string) (units: -)
+- :white_check_mark: FieldLength (type: integer) (units: -)
+- :white_check_mark: FileTransferProtocols (type: memberlist) (units: -)
+- :white_check_mark: HeartbeatInterval (type: integer) (units: seconds)
+- :white_check_mark: MessageAttemptInterval (type: integer) (units: seconds)
+- :white_check_mark: MessageAttempts (type: integer) (units: -)
+- :white_check_mark: MessageTimeout (type: integer) (units: seconds)
+- :white_check_mark: NetworkConfigurationPriority (type: string) (units: -)
+- :white_check_mark: NetworkProfileConnectionAttempts (type: integer) (units: -)
+- :white_check_mark: OfflineThreshold (type: integer) (units: seconds)
+- :white_check_mark: PublicKeyWithSignedMeterValue (type: optionlist) (units: -)
+- :white_check_mark: QueueAllMessages (type: boolean) (units: -)
+- :white_check_mark: ResetRetries (type: integer) (units: -)
+- :white_check_mark: RetryBackOffRandomRange (type: integer) (units: -)
+- :white_check_mark: RetryBackOffRepeatTimes (type: integer) (units: -)
+- :white_check_mark: RetryBackOffWaitMinimum (type: integer) (units: -)
+- :white_check_mark: UnlockOnEVSideDisconnect (type: boolean) (units: -)
+- :white_check_mark: WebSocketPingInterval (type: integer) (units: seconds)
+
+#### ReservationCtrlr
+
+- :white_check_mark: Available (type: boolean) (units: -)
+- :white_check_mark: Enabled (type: boolean) (units: -)
+- :white_check_mark: NonEvseSpecific (type: boolean) (units: -)
+
+#### SampledDataCtrlr
+
+- :white_check_mark: Available (type: boolean) (units: -)
+- :white_check_mark: Enabled (type: boolean) (units: -)
+- :white_check_mark: RegisterValuesWithoutPhases (type: boolean) (units: -)
+- :white_check_mark: SignReadings (type: boolean) (units: -)
+- :white_check_mark: SignStartedReadings (type: boolean) (units: -) **(vendor-specific)**
+- :white_check_mark: SignUpdatedReadings (type: boolean) (units: -) **(vendor-specific)**
+- :white_check_mark: TxEndedInterval (type: integer) (units: seconds)
+- :white_check_mark: TxEndedMeasurands (type: memberlist) (units: -)
+- :white_check_mark: TxStartedMeasurands (type: memberlist) (units: -)
+- :white_check_mark: TxUpdatedInterval (type: integer) (units: seconds)
+- :white_check_mark: TxUpdatedMeasurands (type: memberlist) (units: -)
+
+#### SecurityCtrlr
+
+- :white_check_mark: AdditionalRootCertificateCheck (type: boolean) (units: -)
+- :white_check_mark: BasicAuthPassword (type: string) (units: -)
+- :white_check_mark: CertSigningRepeatTimes (type: integer) (units: -)
+- :white_check_mark: CertSigningWaitMinimum (type: integer) (units: seconds)
+- :white_check_mark: CertificateEntries (type: integer) (units: -)
+- :white_check_mark: CertificatePrivateKey (type: string) (units: -) **(vendor-specific)**
+- :white_check_mark: Identity (type: string) (units: -)
+- :white_check_mark: MaxCertificateChainSize (type: integer) (units: -)
+- :white_check_mark: OrganizationName (type: string) (units: -)
+- :white_check_mark: SecurityProfile (type: integer) (units: -)
+
+#### SmartChargingCtrlr
+
+- :white_check_mark: ACPhaseSwitchingSupported (type: boolean) (units: -)
+- :white_check_mark: Available (type: boolean) (units: -)
+- :white_check_mark: Enabled (type: boolean) (units: -)
+- :white_check_mark: Entries (type: integer) (units: -)
+- :white_check_mark: ExternalControlSignalsEnabled (type: boolean) (units: -)
+- :white_check_mark: LimitChangeSignificance (type: decimal) (units: percent)
+- :white_check_mark: NotifyChargingLimitWithSchedules (type: boolean) (units: -)
+- :white_check_mark: PeriodsPerSchedule (type: integer) (units: -)
+- :white_check_mark: Phases3to1 (type: boolean) (units: -)
+- :white_check_mark: ProfileStackLevel (type: integer) (units: -)
+- :white_check_mark: RateUnit (type: memberlist) (units: -)
+
+#### TariffCostCtrlr
+
+- :white_check_mark: Available (type: boolean) (units: -)
+- :white_check_mark: Currency (type: string) (units: -)
+- :white_check_mark: Enabled (type: boolean) (units: -)
+- :white_check_mark: TariffFallbackMessage (type: string) (units: -)
+- :white_check_mark: TotalCostFallbackMessage (type: string) (units: -)
+
+#### TxCtrlr
+
+- :white_check_mark: ChargingTime (type: decimal) (units: seconds)
+- :white_check_mark: EVConnectionTimeOut (type: integer) (units: seconds)
+- :white_check_mark: MaxEnergyOnInvalidId (type: integer) (units: Wh)
+- :white_check_mark: StopTxOnEVSideDisconnect (type: boolean) (units: -)
+- :white_check_mark: StopTxOnInvalidId (type: boolean) (units: -)
+- :white_check_mark: TxBeforeAcceptedEnabled (type: boolean) (units: -)
+- :white_check_mark: TxStartPoint (type: memberlist) (units: -)
+- :white_check_mark: TxStopPoint (type: memberlist) (units: -)
 
 ## UI Protocol
 
-Protocol to control the simulator via a WebSocket or HTTP server:
+Protocol to control the simulator via the UI server. Three transport types are available:
+
+### MCP Protocol (Model Context Protocol)
+
+The recommended transport for programmatic access. [MCP](https://modelcontextprotocol.io/specification) enables LLM agents and AI tools to discover and use the simulator's capabilities automatically.
+
+#### Agent configuration
+
+| Parameter        | Value                      | Description                                                                           |
+| ---------------- | -------------------------- | ------------------------------------------------------------------------------------- |
+| URL              | `http://<host>:<port>/mcp` | Streamable HTTP endpoint (stateless)                                                  |
+| Transport        | Streamable HTTP            | `POST /mcp` for requests, `GET /mcp` for SSE stream, `DELETE /mcp` for session close  |
+| Authentication   | Basic Auth (optional)      | If enabled in simulator config, use `Authorization: Basic <base64(user:pass)>` header |
+| Protocol version | `2025-03-26`               | MCP specification version                                                             |
+
+### WebSocket Protocol
+
+SRPC protocol over WebSocket for real-time dashboard communication. PDU stands for 'Protocol Data Unit'.
 
 ```mermaid
 sequenceDiagram
 Client->>UI Server: request
 UI Server->>Client: response
-Note over UI Server,Client: HTTP or WebSocket
+Note over UI Server,Client: WebSocket
 ```
-
-### WebSocket Protocol
-
-SRPC protocol over WebSocket. PDU stands for 'Protocol Data Unit'.
 
 - Request:  
   [`uuid`, `ProcedureName`, `PDU`]  
@@ -723,13 +1023,18 @@ Set the WebSocket header _Sec-WebSocket-Protocol_ to `ui0.0.1`.
    `template`: string,  
    `numberOfStations`: number,  
    `options?`: {  
-   `supervisionUrls?`: string | string[],  
-   `persistentConfiguration?`: boolean,  
-   `autoStart?`: boolean,  
    `autoRegister?`: boolean,  
+   `autoStart?`: boolean,  
+   `baseName?`: string,  
    `enableStatistics?`: boolean,  
+   `fixedName?`: boolean,  
+   `nameSuffix?`: string,  
    `ocppStrictCompliance?`: boolean,  
-   `stopTransactionsOnStopped?`: boolean  
+   `persistentConfiguration?`: boolean,  
+   `stopTransactionsOnStopped?`: boolean,  
+   `supervisionPassword?`: string,  
+   `supervisionUrls?`: string | string[],  
+   `supervisionUser?`: string  
    }  
   }
 
@@ -763,8 +1068,11 @@ Set the WebSocket header _Sec-WebSocket-Protocol_ to `ui0.0.1`.
   `ProcedureName`: 'setSupervisionUrl'  
   `PDU`: {  
    `hashIds`: charging station unique identifier strings array (optional, default: all charging stations),  
-   `url`: string  
-  }
+   `url`: string,  
+   `supervisionUser?`: string,  
+   `supervisionPassword?`: string  
+  }  
+  `url` is required. `supervisionUser` and `supervisionPassword` are each optional and independent: a string (including `""`, which clears the field) updates the value; omitting the field preserves the existing value. Changes take effect on the next WebSocket (re)connect.
 
 - Response:  
   `PDU`: {  
@@ -896,6 +1204,40 @@ Set the WebSocket header _Sec-WebSocket-Protocol_ to `ui0.0.1`.
    `responsesFailed`: failed responses payload array (optional)  
   }
 
+###### Lock Connector
+
+- Request:  
+  `ProcedureName`: 'lockConnector'  
+  `PDU`: {  
+   `hashIds`: charging station unique identifier strings array (optional, default: all charging stations),  
+   `connectorId`: connector id integer  
+  }
+
+- Response:  
+  `PDU`: {  
+   `status`: 'success' | 'failure',  
+   `hashIdsSucceeded`: charging station unique identifier strings array,  
+   `hashIdsFailed`: charging station unique identifier strings array (optional),  
+   `responsesFailed`: failed responses payload array (optional)  
+  }
+
+###### Unlock Connector
+
+- Request:  
+  `ProcedureName`: 'unlockConnector'  
+  `PDU`: {  
+   `hashIds`: charging station unique identifier strings array (optional, default: all charging stations),  
+   `connectorId`: connector id integer  
+  }
+
+- Response:  
+  `PDU`: {  
+   `status`: 'success' | 'failure',  
+   `hashIdsSucceeded`: charging station unique identifier strings array,  
+   `hashIdsFailed`: charging station unique identifier strings array (optional),  
+   `responsesFailed`: failed responses payload array (optional)  
+  }
+
 ###### OCPP commands trigger
 
 - Request:  
@@ -912,6 +1254,12 @@ Set the WebSocket header _Sec-WebSocket-Protocol_ to `ui0.0.1`.
    `hashIdsFailed`: charging station unique identifier strings array (optional),  
    `responsesFailed`: failed responses payload array (optional)  
   }
+
+Available OCPP command procedure names:
+
+OCPP 1.6: `authorize`, `bootNotification`, `dataTransfer`, `diagnosticsStatusNotification`, `firmwareStatusNotification`, `heartbeat`, `meterValues`, `startTransaction`, `statusNotification`, `stopTransaction`
+
+OCPP 2.0.x: `bootNotification`, `firmwareStatusNotification`, `get15118EVCertificate`, `getCertificateStatus`, `heartbeat`, `logStatusNotification`, `meterValues`, `notifyCustomerInformation`, `notifyReport`, `securityEventNotification`, `signCertificate`, `statusNotification`, `transactionEvent`
 
 Examples:
 
@@ -997,7 +1345,9 @@ Examples:
      `responsesFailed`: failed responses payload array (optional)  
     }
 
-### HTTP Protocol
+### HTTP Protocol (deprecated)
+
+> **Deprecated**: Use `"type": "mcp"` for HTTP-based access to the simulator.
 
 To learn how to use the HTTP protocol to pilot the simulator, an [Insomnia](https://insomnia.rest/) HTTP requests collection is available in [src/assets/ui-protocol](./src/assets/ui-protocol) directory.
 
@@ -1011,4 +1361,4 @@ We as members, contributors, and leaders pledge to make participation in our com
 
 ## Licensing
 
-Copyright 2020-2025 SAP SE or an SAP affiliate company and e-mobility-charging-stations-simulator contributors. Please see our [LICENSE](./LICENSE) for copyright and license information. Detailed information including third-party components and their licensing/copyright information is available [via the REUSE tool](https://api.reuse.software/info/github.com/SAP/e-mobility-charging-stations-simulator).
+Copyright 2020-2026 SAP SE or an SAP affiliate company and e-mobility-charging-stations-simulator contributors. Please see our [LICENSE](./LICENSE) for copyright and license information. Detailed information including third-party components and their licensing/copyright information is available [via the REUSE tool](https://api.reuse.software/info/github.com/SAP/e-mobility-charging-stations-simulator).

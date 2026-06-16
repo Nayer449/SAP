@@ -1,15 +1,20 @@
-import type { ChargingStation } from '../../../ChargingStation.js'
+import type { JsonObject } from '../../../../types/index.js'
+import type { ChargingStation } from '../../../index.js'
 import type { AuthStrategy, OCPPAuthAdapter } from '../interfaces/OCPPAuthService.js'
 import type {
   AuthConfiguration,
   AuthorizationResult,
   AuthRequest,
-  UnifiedIdentifier,
+  Identifier,
 } from '../types/AuthTypes.js'
 
 import { OCPPVersion } from '../../../../types/index.js'
 import { isNotEmptyString, logger, sleep } from '../../../../utils/index.js'
 import { AuthenticationMethod, AuthorizationStatus, IdentifierType } from '../types/AuthTypes.js'
+
+const moduleName = 'CertificateAuthStrategy'
+
+const CERTIFICATE_VERIFY_DELAY_MS = 100
 
 /**
  * Certificate-based authentication strategy for OCPP 2.0+
@@ -24,7 +29,7 @@ export class CertificateAuthStrategy implements AuthStrategy {
   public readonly name = 'CertificateAuthStrategy'
   public readonly priority = 3
 
-  private readonly adapters: Map<OCPPVersion, OCPPAuthAdapter>
+  private readonly adapter: OCPPAuthAdapter
   private readonly chargingStation: ChargingStation
   private isInitialized = false
   private stats = {
@@ -35,9 +40,9 @@ export class CertificateAuthStrategy implements AuthStrategy {
     totalRequests: 0,
   }
 
-  constructor (chargingStation: ChargingStation, adapters: Map<OCPPVersion, OCPPAuthAdapter>) {
+  constructor (chargingStation: ChargingStation, adapter: OCPPAuthAdapter) {
     this.chargingStation = chargingStation
-    this.adapters = adapters
+    this.adapter = adapter
   }
 
   /**
@@ -59,7 +64,7 @@ export class CertificateAuthStrategy implements AuthStrategy {
       const certValidation = this.validateCertificateData(request.identifier)
       if (!certValidation.isValid) {
         logger.warn(
-          `${this.chargingStation.logPrefix()} Certificate validation failed: ${String(certValidation.reason)}`
+          `${moduleName}: Certificate validation failed: ${String(certValidation.reason)}`
         )
         return this.createFailureResult(
           AuthorizationStatus.INVALID,
@@ -69,19 +74,10 @@ export class CertificateAuthStrategy implements AuthStrategy {
         )
       }
 
-      // Get the appropriate adapter
-      const adapter = this.adapters.get(request.identifier.ocppVersion)
-      if (!adapter) {
-        return this.createFailureResult(
-          AuthorizationStatus.INVALID,
-          `No adapter available for OCPP ${request.identifier.ocppVersion}`,
-          request.identifier,
-          startTime
-        )
-      }
+      const adapter = this.adapter
 
       // For OCPP 2.0, we can use certificate-based validation
-      if (request.identifier.ocppVersion === OCPPVersion.VERSION_20) {
+      if (this.adapter.ocppVersion === OCPPVersion.VERSION_201) {
         const result = await this.validateCertificateWithOCPP20(request, adapter, config)
         this.updateStatistics(result, startTime)
         return result
@@ -90,12 +86,12 @@ export class CertificateAuthStrategy implements AuthStrategy {
       // Should not reach here due to canHandle check, but handle gracefully
       return this.createFailureResult(
         AuthorizationStatus.INVALID,
-        `Certificate authentication not supported for OCPP ${request.identifier.ocppVersion}`,
+        `Certificate authentication not supported for OCPP ${this.adapter.ocppVersion}`,
         request.identifier,
         startTime
       )
     } catch (error) {
-      logger.error(`${this.chargingStation.logPrefix()} Certificate authorization error:`, error)
+      logger.error(`${moduleName}: Certificate authorization error:`, error)
       return this.createFailureResult(
         AuthorizationStatus.INVALID,
         'Certificate authorization failed',
@@ -118,12 +114,9 @@ export class CertificateAuthStrategy implements AuthStrategy {
     }
 
     // Only supported in OCPP 2.0+
-    if (request.identifier.ocppVersion === OCPPVersion.VERSION_16) {
+    if (this.adapter.ocppVersion === OCPPVersion.VERSION_16) {
       return false
     }
-
-    // Must have an adapter for this OCPP version
-    const hasAdapter = this.adapters.has(request.identifier.ocppVersion)
 
     // Certificate authentication must be enabled
     const certAuthEnabled = config.certificateAuthEnabled
@@ -131,17 +124,15 @@ export class CertificateAuthStrategy implements AuthStrategy {
     // Must have certificate data in the identifier
     const hasCertificateData = this.hasCertificateData(request.identifier)
 
-    return hasAdapter && certAuthEnabled && hasCertificateData && this.isInitialized
+    return certAuthEnabled && hasCertificateData && this.isInitialized
   }
 
   cleanup (): void {
     this.isInitialized = false
-    logger.debug(
-      `${this.chargingStation.logPrefix()} Certificate authentication strategy cleaned up`
-    )
+    logger.debug(`${moduleName}: Certificate authentication strategy cleaned up`)
   }
 
-  getStats (): Record<string, unknown> {
+  getStats (): JsonObject {
     return {
       ...this.stats,
       isInitialized: this.isInitialized,
@@ -150,22 +141,20 @@ export class CertificateAuthStrategy implements AuthStrategy {
 
   initialize (config: AuthConfiguration): void {
     if (!config.certificateAuthEnabled) {
-      logger.info(`${this.chargingStation.logPrefix()} Certificate authentication disabled`)
+      logger.info(`${moduleName}: Certificate authentication disabled`)
       return
     }
 
-    logger.info(
-      `${this.chargingStation.logPrefix()} Certificate authentication strategy initialized`
-    )
+    logger.info(`${moduleName}: Certificate authentication strategy initialized`)
     this.isInitialized = true
   }
 
   /**
    * Calculate certificate expiry information
-   * @param identifier - Unified identifier containing certificate hash data
+   * @param identifier - Identifier containing certificate hash data
    * @returns Expiry date extracted from certificate, or undefined if not determinable
    */
-  private calculateCertificateExpiry (identifier: UnifiedIdentifier): Date | undefined {
+  private calculateCertificateExpiry (identifier: Identifier): Date | undefined {
     // In a real implementation, this would parse the actual certificate
     // and extract the notAfter field. For simulation, we'll use a placeholder.
 
@@ -186,14 +175,14 @@ export class CertificateAuthStrategy implements AuthStrategy {
    * Create a failure result with consistent format
    * @param status - Authorization status indicating the failure type
    * @param reason - Human-readable description of why authorization failed
-   * @param identifier - Unified identifier from the original request
+   * @param identifier - Identifier from the original request
    * @param startTime - Request start timestamp for response time calculation
    * @returns Authorization result with failure status and diagnostic information
    */
   private createFailureResult (
     status: AuthorizationStatus,
     reason: string,
-    identifier: UnifiedIdentifier,
+    identifier: Identifier,
     startTime: number
   ): AuthorizationResult {
     const result: AuthorizationResult = {
@@ -214,10 +203,10 @@ export class CertificateAuthStrategy implements AuthStrategy {
 
   /**
    * Check if the identifier contains certificate data
-   * @param identifier - Unified identifier to check for certificate hash data
+   * @param identifier - Identifier to check for certificate hash data
    * @returns True if all required certificate hash fields are present and non-empty
    */
-  private hasCertificateData (identifier: UnifiedIdentifier): boolean {
+  private hasCertificateData (identifier: Identifier): boolean {
     const certData = identifier.certificateHashData
     if (!certData) return false
 
@@ -240,7 +229,7 @@ export class CertificateAuthStrategy implements AuthStrategy {
     config: AuthConfiguration
   ): Promise<boolean> {
     // Simulate validation delay
-    await sleep(100)
+    await sleep(CERTIFICATE_VERIFY_DELAY_MS)
 
     // In a real implementation, this would:
     // 1. Load trusted CA certificates from configuration
@@ -300,10 +289,10 @@ export class CertificateAuthStrategy implements AuthStrategy {
 
   /**
    * Validate certificate data structure and content
-   * @param identifier - Unified identifier containing certificate hash data to validate
+   * @param identifier - Identifier containing certificate hash data to validate
    * @returns Validation result with isValid flag and optional reason on failure
    */
-  private validateCertificateData (identifier: UnifiedIdentifier): {
+  private validateCertificateData (identifier: Identifier): {
     isValid: boolean
     reason?: string
   } {
@@ -390,7 +379,7 @@ export class CertificateAuthStrategy implements AuthStrategy {
         }
 
         logger.info(
-          `${this.chargingStation.logPrefix()} Certificate authorization successful for certificate ${request.identifier.certificateHashData?.serialNumber ?? 'unknown'}`
+          `${moduleName}: Certificate authorization successful for certificate ${request.identifier.certificateHashData?.serialNumber ?? 'unknown'}`
         )
 
         return successResult
@@ -403,10 +392,7 @@ export class CertificateAuthStrategy implements AuthStrategy {
         )
       }
     } catch (error) {
-      logger.error(
-        `${this.chargingStation.logPrefix()} OCPP 2.0 certificate validation error:`,
-        error
-      )
+      logger.error(`${moduleName}: OCPP 2.0 certificate validation error:`, error)
       return this.createFailureResult(
         AuthorizationStatus.INVALID,
         'Certificate validation error',

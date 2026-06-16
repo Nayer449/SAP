@@ -1,16 +1,13 @@
 /**
  * @file Tests for InMemoryAuthCache
- * @description Unit tests for in-memory authorization cache conformance (G03.FR.01)
+ * @description Unit tests for in-memory authorization cache conformance — OCPP 2.0.1 Authorization Cache (C10/C11/C12)
  */
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 
 import type { AuthorizationResult } from '../../../../../src/charging-station/ocpp/auth/types/AuthTypes.js'
 
-import {
-  InMemoryAuthCache,
-  truncateId,
-} from '../../../../../src/charging-station/ocpp/auth/cache/InMemoryAuthCache.js'
+import { InMemoryAuthCache } from '../../../../../src/charging-station/ocpp/auth/cache/InMemoryAuthCache.js'
 import {
   AuthenticationMethod,
   AuthorizationStatus,
@@ -19,17 +16,17 @@ import { standardCleanup, withMockTimers } from '../../../../helpers/TestLifecyc
 import { createMockAuthorizationResult } from '../helpers/MockFactories.js'
 
 /**
- * OCPP 2.0 Cache Conformance Tests (G03.FR.01)
+ * OCPP 2.0.1 Authorization Cache Conformance Tests (C10/C11/C12)
  *
  * Tests verify:
- * - Cache hit/miss behavior
- * - TTL-based expiration
- * - Cache invalidation
+ * - Cache hit/miss behavior (C10, C12)
+ * - TTL-based expiration (C10.FR.08)
+ * - Cache invalidation (C11)
  * - Rate limiting (security)
- * - LRU eviction
+ * - LRU eviction (C10.FR.07)
  * - Statistics accuracy
  */
-await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
+await describe('InMemoryAuthCache - OCPP 2.0.1 Authorization Cache Conformance', async () => {
   let cache: InMemoryAuthCache
 
   beforeEach(() => {
@@ -48,7 +45,7 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
     standardCleanup()
   })
 
-  await describe('G03.FR.01.001 - Cache Hit Behavior', async () => {
+  await describe('C10 - Cache Hit Behavior', async () => {
     let mockResult: AuthorizationResult
 
     beforeEach(() => {
@@ -115,7 +112,7 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
     })
   })
 
-  await describe('G03.FR.01.002 - Cache Miss Behavior', async () => {
+  await describe('C12 - Cache Miss Behavior', async () => {
     let mockResult: AuthorizationResult
 
     beforeEach(() => {
@@ -160,7 +157,7 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
     })
   })
 
-  await describe('G03.FR.01.003 - Cache Expiration (TTL)', async () => {
+  await describe('C10.FR.08 - Cache Expiration (TTL)', async () => {
     let mockResult: AuthorizationResult
 
     beforeEach(() => {
@@ -196,7 +193,7 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
         cache.get('token-2')
 
         const stats = cache.getStats()
-        assert.ok(stats.expiredEntries >= 2)
+        assert.ok(stats.expiredEntries >= 2, 'should track at least 2 expired entries')
       })
     })
 
@@ -230,7 +227,7 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
     })
   })
 
-  await describe('G03.FR.01.004 - Cache Invalidation', async () => {
+  await describe('C11 - Cache Invalidation', async () => {
     let mockResult: AuthorizationResult
 
     beforeEach(() => {
@@ -274,8 +271,8 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
       cache.get('miss')
 
       const statsBefore = cache.getStats()
-      assert.ok(statsBefore.hits > 0)
-      assert.ok(statsBefore.misses > 0)
+      assert.ok(statsBefore.hits > 0, 'should have cache hits before clear')
+      assert.ok(statsBefore.misses > 0, 'should have cache misses before clear')
 
       cache.clear()
 
@@ -286,7 +283,7 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
     })
   })
 
-  await describe('G03.FR.01.005 - Rate Limiting (Security)', async () => {
+  await describe('Rate Limiting (Security)', async () => {
     let mockResult: AuthorizationResult
 
     beforeEach(() => {
@@ -306,7 +303,10 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
       assert.strictEqual(result, undefined)
 
       const stats = cache.getStats()
-      assert.ok(stats.rateLimit.blockedRequests > 0)
+      assert.ok(
+        stats.rateLimit.blockedRequests > 0,
+        'should have blocked requests in rate limit stats'
+      )
     })
 
     await it('should track rate limit statistics', () => {
@@ -319,8 +319,8 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
       cache.set(identifier, mockResult) // Should be blocked
 
       const stats = cache.getStats()
-      assert.ok(stats.rateLimit.totalChecks > 0)
-      assert.ok(stats.rateLimit.blockedRequests > 0)
+      assert.ok(stats.rateLimit.totalChecks > 0, 'should have total rate limit checks')
+      assert.ok(stats.rateLimit.blockedRequests > 0, 'should have blocked requests')
     })
 
     await it('should reset rate limit after window expires', async t => {
@@ -369,7 +369,7 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
     })
   })
 
-  await describe('G03.FR.01.006 - LRU Eviction', async () => {
+  await describe('C10.FR.07 - LRU Eviction', async () => {
     let mockResult: AuthorizationResult
 
     beforeEach(() => {
@@ -412,7 +412,7 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
     })
   })
 
-  await describe('G03.FR.01.007 - Statistics & Monitoring', async () => {
+  await describe('Statistics & Monitoring', async () => {
     let mockResult: AuthorizationResult
 
     beforeEach(() => {
@@ -431,7 +431,7 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
       assert.strictEqual(stats.hits, 1)
       assert.strictEqual(stats.misses, 1)
       assert.strictEqual(stats.hitRate, 50)
-      assert.ok(stats.memoryUsage > 0)
+      assert.ok(stats.memoryUsage > 0, 'should have positive memory usage')
     })
 
     await it('should track memory usage estimate', () => {
@@ -446,7 +446,7 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
       const statsAfter = cache.getStats()
       const memoryAfter = statsAfter.memoryUsage
 
-      assert.ok(memoryAfter > memoryBefore)
+      assert.ok(memoryAfter > memoryBefore, 'memory usage should increase with more entries')
     })
 
     await it('should provide rate limit statistics', () => {
@@ -459,13 +459,13 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
       const stats = cache.getStats()
 
       assert.notStrictEqual(stats.rateLimit, undefined)
-      assert.ok(stats.rateLimit.totalChecks > 0)
-      assert.ok(stats.rateLimit.blockedRequests > 0)
-      assert.ok(stats.rateLimit.rateLimitedIdentifiers > 0)
+      assert.ok(stats.rateLimit.totalChecks > 0, 'should have total rate limit checks')
+      assert.ok(stats.rateLimit.blockedRequests > 0, 'should have blocked requests')
+      assert.ok(stats.rateLimit.rateLimitedIdentifiers > 0, 'should have rate limited identifiers')
     })
   })
 
-  await describe('G03.FR.01.008 - Edge Cases', async () => {
+  await describe('Edge Cases', async () => {
     let mockResult: AuthorizationResult
 
     beforeEach(() => {
@@ -488,7 +488,7 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
       assert.notStrictEqual(result, undefined)
     })
 
-    await it('should handle concurrent operations', () => {
+    await it('should handle sequential batch operations', () => {
       // Concurrent sets
       cache.set('token-1', mockResult)
       cache.set('token-2', mockResult)
@@ -519,7 +519,7 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
     })
   })
 
-  await describe('G03.FR.01.009 - Integration with Auth System', async () => {
+  await describe('Integration with Auth System', async () => {
     await it('should cache ACCEPTED authorization results', () => {
       const mockResult = createMockAuthorizationResult({
         method: AuthenticationMethod.REMOTE_AUTHORIZATION,
@@ -584,8 +584,8 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
     })
   })
 
-  await describe('G03.FR.01.T5 - Status-aware Eviction (R2)', async () => {
-    await it('G03.FR.01.T5.01 - should evict non-valid entry before valid one', () => {
+  await describe('C10.FR.07 - Status-aware Eviction', async () => {
+    await it('C10.FR.07.T01 - should evict non-valid entry before valid one', () => {
       const lruCache = new InMemoryAuthCache({
         defaultTtl: 3600,
         maxEntries: 2,
@@ -614,7 +614,7 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
       assert.notStrictEqual(newResult, undefined)
     })
 
-    await it('G03.FR.01.T5.02 - should fall back to LRU when all entries are ACCEPTED', () => {
+    await it('C10.FR.07.T02 - should fall back to LRU when all entries are ACCEPTED', () => {
       const lruCache = new InMemoryAuthCache({
         defaultTtl: 3600,
         maxEntries: 2,
@@ -642,8 +642,8 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
     })
   })
 
-  await describe('G03.FR.01.T6 - TTL Reset on Access (R16, R5)', async () => {
-    await it('G03.FR.01.T6.01 - should reset TTL on cache hit', async t => {
+  await describe('C10.FR.08 - TTL Reset on Access', async () => {
+    await it('C10.FR.08.T01 - should reset TTL on cache hit', async t => {
       await withMockTimers(t, ['Date'], () => {
         const shortCache = new InMemoryAuthCache({
           defaultTtl: 0.15, // 150ms
@@ -666,7 +666,7 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
       })
     })
 
-    await it('G03.FR.01.T6.02 - should not reset TTL when max absolute lifetime exceeded', async t => {
+    await it('C10.FR.08.T02 - should not reset TTL when max absolute lifetime exceeded', async t => {
       await withMockTimers(t, ['Date'], () => {
         const shortCache = new InMemoryAuthCache({
           defaultTtl: 0.15, // 150ms
@@ -685,8 +685,8 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
     })
   })
 
-  await describe('G03.FR.01.T7 - Expired Entry Lifecycle (R10)', async () => {
-    await it('G03.FR.01.T7.01 - should return EXPIRED status instead of undefined', async t => {
+  await describe('C10.FR.08 - Expired Entry Lifecycle', async () => {
+    await it('C10.FR.08.T03 - should return EXPIRED status instead of undefined', async t => {
       await withMockTimers(t, ['Date'], () => {
         const shortCache = new InMemoryAuthCache({
           defaultTtl: 0.001,
@@ -705,7 +705,7 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
       })
     })
 
-    await it('G03.FR.01.T7.02 - should keep expired entry in cache after first access', async t => {
+    await it('C10.FR.08.T04 - should keep expired entry in cache after first access', async t => {
       await withMockTimers(t, ['Date'], () => {
         const shortCache = new InMemoryAuthCache({
           defaultTtl: 0.001,
@@ -733,20 +733,8 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
     })
   })
 
-  await describe('Helper - truncateId', async () => {
-    await it('should return identifier unchanged when short', () => {
-      const result = truncateId('ABCD')
-      assert.strictEqual(result, 'ABCD')
-    })
-
-    await it('should truncate long identifier with ellipsis', () => {
-      const result = truncateId('ABCDEFGHIJKLMNOP')
-      assert.strictEqual(result, 'ABCDEFGH...')
-    })
-  })
-
-  await describe('G03.FR.01.T10 - Periodic Cleanup and Rate Limit Bounds (R8, R9)', async () => {
-    await it('G03.FR.01.T10.01 - dispose() stops the cleanup interval and is safe to call twice', () => {
+  await describe('Periodic Cleanup and Rate Limit Bounds', async () => {
+    await it('should stop the cleanup interval and be safe to call dispose() twice', () => {
       const cleanupCache = new InMemoryAuthCache({
         cleanupIntervalSeconds: 1,
         defaultTtl: 3600,
@@ -761,7 +749,7 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
       })
     })
 
-    await it('G03.FR.01.T10.02 - cleanup interval is not started when cleanupIntervalSeconds is 0', () => {
+    await it('should not start cleanup interval when cleanupIntervalSeconds is 0', () => {
       const noCleanupCache = new InMemoryAuthCache({
         cleanupIntervalSeconds: 0,
         defaultTtl: 3600,
@@ -772,7 +760,7 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
       noCleanupCache.dispose()
     })
 
-    await it('G03.FR.01.T10.03 - runCleanup removes expired entries (two-phase)', async t => {
+    await it('should remove expired entries via runCleanup (two-phase)', async t => {
       await withMockTimers(t, ['Date'], () => {
         const cleanupCache = new InMemoryAuthCache({
           cleanupIntervalSeconds: 0,
@@ -806,7 +794,7 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
       })
     })
 
-    await it('G03.FR.01.T10.04 - rateLimits map is bounded to maxEntries * 2', () => {
+    await it('should bound rateLimits map to maxEntries * 2', () => {
       const boundedCache = new InMemoryAuthCache({
         cleanupIntervalSeconds: 0,
         defaultTtl: 3600,
@@ -819,13 +807,13 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
       }
 
       const rateLimitsSize = boundedCache.getStats().rateLimit.rateLimitedIdentifiers
-      assert.ok(rateLimitsSize <= 4)
+      assert.ok(rateLimitsSize <= 4, 'rate limits size should be at most 4')
       boundedCache.dispose()
     })
   })
 
-  await describe('G03.FR.01.T11 - Stats preservation and resetStats() (R14, R15)', async () => {
-    await it('G03.FR.01.T11.01 - clear() preserves hits, misses, evictions', () => {
+  await describe('Stats preservation and resetStats()', async () => {
+    await it('should preserve hits, misses, evictions on clear()', () => {
       const statsCache = new InMemoryAuthCache({
         cleanupIntervalSeconds: 0,
         defaultTtl: 3600,
@@ -840,9 +828,9 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
       statsCache.get('id-miss') // miss
 
       const before = statsCache.getStats()
-      assert.ok(before.evictions > 0)
-      assert.ok(before.hits > 0)
-      assert.ok(before.misses > 0)
+      assert.ok(before.evictions > 0, 'should have evictions')
+      assert.ok(before.hits > 0, 'should have cache hits')
+      assert.ok(before.misses > 0, 'should have cache misses')
 
       statsCache.clear()
 
@@ -854,7 +842,7 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
       statsCache.dispose()
     })
 
-    await it('G03.FR.01.T11.02 - resetStats() zeroes all stat fields', () => {
+    await it('should zero all stat fields on resetStats()', () => {
       const statsCache = new InMemoryAuthCache({
         cleanupIntervalSeconds: 0,
         defaultTtl: 3600,
@@ -867,8 +855,8 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
       statsCache.get('id-miss') // miss
 
       const before = statsCache.getStats()
-      assert.ok(before.hits > 0)
-      assert.ok(before.misses > 0)
+      assert.ok(before.hits > 0, 'should have cache hits before reset')
+      assert.ok(before.misses > 0, 'should have cache misses before reset')
 
       statsCache.resetStats()
 
@@ -879,7 +867,7 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
       statsCache.dispose()
     })
 
-    await it('G03.FR.01.T11.03 - resetStats() after clear() zeroes stats correctly', () => {
+    await it('should zero stats correctly on resetStats() after clear()', () => {
       const statsCache = new InMemoryAuthCache({
         cleanupIntervalSeconds: 0,
         defaultTtl: 3600,
@@ -893,7 +881,7 @@ await describe('InMemoryAuthCache - G03.FR.01 Conformance', async () => {
       statsCache.clear() // clears entries but preserves stats
 
       const afterClear = statsCache.getStats()
-      assert.ok(afterClear.hits > 0) // stats preserved
+      assert.ok(afterClear.hits > 0, 'stats preserved after clear') // stats preserved
       assert.strictEqual(afterClear.totalEntries, 0) // entries gone
 
       statsCache.resetStats() // now zero out

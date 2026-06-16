@@ -10,34 +10,40 @@ import {
   checkChargingStationState,
   checkConfiguration,
   checkStationInfoConnectorStatus,
-  checkTemplate,
   getBootConnectorStatus,
   getChargingStationId,
   getHashId,
+  getMaxConfiguredNumberOfConnectors,
   getMaxNumberOfEvses,
   getPhaseRotationValue,
   hasPendingReservation,
   hasPendingReservations,
   hasReservationExpired,
+  pickConfiguredNumberOfConnectors,
+  resetConnectorStatus,
+  setChargingStationOptions,
   validateStationInfo,
-} from '../../src/charging-station/Helpers.js'
+} from '../../src/charging-station/index.js'
 import {
   AvailabilityType,
-  type ChargingStationConfiguration,
+  type ChargingProfile,
+  ChargingProfilePurposeType,
   type ChargingStationInfo,
+  type ChargingStationOptions,
   type ChargingStationTemplate,
   type ConnectorStatus,
   ConnectorStatusEnum,
   OCPPVersion,
   type Reservation,
+  type SampledValueTemplate,
 } from '../../src/types/index.js'
-import { logger } from '../../src/utils/Logger.js'
+import { logger } from '../../src/utils/index.js'
 import { standardCleanup } from '../helpers/TestLifecycleHelpers.js'
 import { TEST_CHARGING_STATION_BASE_NAME } from './ChargingStationTestConstants.js'
 import {
   createMockChargingStation,
   createMockChargingStationTemplate,
-} from './ChargingStationTestUtils.js'
+} from './helpers/StationHelpers.js'
 
 await describe('Helpers', async () => {
   let chargingStationTemplate: ChargingStationTemplate
@@ -51,13 +57,12 @@ await describe('Helpers', async () => {
   })
 
   // Helper to create test reservations with configurable expiry
-  const createTestReservation = (expired = false): Reservation =>
-    ({
-      connectorId: 1,
-      expiryDate: new Date(Date.now() + (expired ? -60000 : 60000)),
-      idTag: 'tag1',
-      reservationId: 1,
-    }) as Reservation
+  const createTestReservation = (expired = false): Reservation => ({
+    connectorId: 1,
+    expiryDate: new Date(Date.now() + (expired ? -60000 : 60000)),
+    idTag: 'tag1',
+    reservationId: 1,
+  })
 
   await it('should return formatted charging station ID with index', () => {
     assert.strictEqual(
@@ -71,6 +76,117 @@ await describe('Helpers', async () => {
       getHashId(1, chargingStationTemplate),
       'b4b1e8ec4fca79091d99ea9a7ea5901548010e6c0e98be9296f604b9d68734444dfdae73d7d406b6124b42815214d088'
     )
+  })
+
+  await it('should return baseName verbatim when fixedName is true', () => {
+    const template = {
+      baseName: 'DYNAMIC-STATION',
+      fixedName: true,
+    } satisfies Partial<ChargingStationTemplate>
+    assert.strictEqual(
+      getChargingStationId(1, template as ChargingStationTemplate),
+      'DYNAMIC-STATION'
+    )
+  })
+
+  await it('should append nameSuffix to the indexed id when fixedName is false', () => {
+    const template = {
+      baseName: 'CS',
+      fixedName: false,
+      nameSuffix: '-X',
+    } satisfies Partial<ChargingStationTemplate>
+    assert.strictEqual(getChargingStationId(7, template as ChargingStationTemplate), 'CS-00007-X')
+  })
+
+  await it('should derive charging station id from stationInfo identity fields', () => {
+    // stationInfo satisfies the ChargingStationNameTemplate shape since it inherits baseName / fixedName / nameSuffix from the template type.
+    const stationInfo = {
+      baseName: 'INFO-STATION',
+      fixedName: true,
+    } satisfies Partial<ChargingStationInfo>
+    assert.strictEqual(getChargingStationId(1, stationInfo as ChargingStationInfo), 'INFO-STATION')
+  })
+
+  await it('should honour chargingStationId override in getHashId', () => {
+    const hashWithoutOverride = getHashId(1, chargingStationTemplate)
+    const hashWithOverride = getHashId(1, chargingStationTemplate, 'OVERRIDDEN-ID')
+    assert.notStrictEqual(hashWithoutOverride, hashWithOverride)
+    // Passing the default-derived id explicitly must reproduce the default hash.
+    assert.strictEqual(
+      getHashId(1, chargingStationTemplate, getChargingStationId(1, chargingStationTemplate)),
+      hashWithoutOverride
+    )
+  })
+
+  await it('should produce distinct hash ids when identity options differ', () => {
+    const baseId = getChargingStationId(1, chargingStationTemplate)
+    const overriddenId = getChargingStationId(1, {
+      ...chargingStationTemplate,
+      baseName: 'OTHER',
+    })
+    assert.notStrictEqual(
+      getHashId(1, chargingStationTemplate, baseId),
+      getHashId(1, chargingStationTemplate, overriddenId)
+    )
+  })
+
+  await describe('setChargingStationOptions', async () => {
+    const buildStationInfo = (): ChargingStationInfo =>
+      ({
+        baseName: TEST_CHARGING_STATION_BASE_NAME,
+        hashId: 'placeholder',
+        templateIndex: 0,
+        templateName: 'test-template',
+      }) as ChargingStationInfo
+
+    await it('should return stationInfo unchanged when options are undefined', () => {
+      const stationInfo = buildStationInfo()
+      const before = { ...stationInfo }
+      const result = setChargingStationOptions(stationInfo)
+      assert.deepStrictEqual(result, before)
+    })
+
+    await it('should apply baseName override', () => {
+      const options: ChargingStationOptions = { baseName: 'DYNAMIC' }
+      const result = setChargingStationOptions(buildStationInfo(), options)
+      assert.strictEqual(result.baseName, 'DYNAMIC')
+    })
+
+    await it('should apply fixedName override', () => {
+      const options: ChargingStationOptions = { fixedName: true }
+      const result = setChargingStationOptions(buildStationInfo(), options)
+      assert.strictEqual(result.fixedName, true)
+    })
+
+    await it('should apply nameSuffix override', () => {
+      const options: ChargingStationOptions = { nameSuffix: '-SUFFIX' }
+      const result = setChargingStationOptions(buildStationInfo(), options)
+      assert.strictEqual(result.nameSuffix, '-SUFFIX')
+    })
+
+    await it('should apply supervisionUser override', () => {
+      const options: ChargingStationOptions = { supervisionUser: 'alice' }
+      const result = setChargingStationOptions(buildStationInfo(), options)
+      assert.strictEqual(result.supervisionUser, 'alice')
+    })
+
+    await it('should apply supervisionPassword override', () => {
+      const options: ChargingStationOptions = { supervisionPassword: 'secret' }
+      const result = setChargingStationOptions(buildStationInfo(), options)
+      assert.strictEqual(result.supervisionPassword, 'secret')
+    })
+
+    await it('should not overwrite stationInfo fields when option value is undefined', () => {
+      const stationInfo = buildStationInfo()
+      stationInfo.baseName = 'KEEP-ME'
+      stationInfo.supervisionUser = 'original'
+      const result = setChargingStationOptions(stationInfo, {
+        autoStart: true,
+      })
+      assert.strictEqual(result.baseName, 'KEEP-ME')
+      assert.strictEqual(result.supervisionUser, 'original')
+      assert.strictEqual(result.autoStart, true)
+    })
   })
 
   await it('should throw when stationInfo is missing', () => {
@@ -512,30 +628,6 @@ await describe('Helpers', async () => {
     assert.strictEqual(getMaxNumberOfEvses({}), 0)
   })
 
-  await it('should throw for undefined or empty template', t => {
-    // Arrange
-    const warnMock = t.mock.method(logger, 'warn')
-    const errorMock = t.mock.method(logger, 'error')
-
-    // Act & Assert
-    assert.throws(
-      () => {
-        checkTemplate(undefined, 'log prefix |', 'test-template.json')
-      },
-      { message: /Failed to read charging station template file test-template\.json/ }
-    )
-    assert.strictEqual(errorMock.mock.calls.length, 1)
-    assert.throws(
-      () => {
-        checkTemplate({} as ChargingStationTemplate, 'log prefix |', 'test-template.json')
-      },
-      { message: /Empty charging station information from template file test-template\.json/ }
-    )
-    assert.strictEqual(errorMock.mock.calls.length, 2)
-    checkTemplate(chargingStationTemplate, 'log prefix |', 'test-template.json')
-    assert.strictEqual(warnMock.mock.calls.length, 1)
-  })
-
   await it('should throw for undefined or empty configuration', t => {
     // Arrange
     const errorMock = t.mock.method(logger, 'error')
@@ -550,7 +642,7 @@ await describe('Helpers', async () => {
     assert.strictEqual(errorMock.mock.calls.length, 1)
     assert.throws(
       () => {
-        checkConfiguration({} as ChargingStationConfiguration, 'log prefix |', 'configuration.json')
+        checkConfiguration({}, 'log prefix |', 'configuration.json')
       },
       { message: /Empty charging station configuration from file configuration\.json/ }
     )
@@ -717,7 +809,7 @@ await describe('Helpers', async () => {
       baseName: TEST_CHARGING_STATION_BASE_NAME,
       connectorsCount: 2,
     })
-    const connectorStatus = chargingStation.connectors.get(1)
+    const connectorStatus = chargingStation.getConnectorStatus(1)
     if (connectorStatus != null) {
       connectorStatus.reservation = createTestReservation(false)
     }
@@ -745,8 +837,9 @@ await describe('Helpers', async () => {
       connectorsCount: 2,
       stationInfo: { ocppVersion: OCPPVersion.VERSION_201 },
     })
-    const firstEvse = chargingStation.evses.get(1)
-    const firstConnector = firstEvse?.connectors.values().next().value
+    const firstConnectorId = chargingStation.getConnectorIdByEvseId(1)
+    const firstConnector =
+      firstConnectorId != null ? chargingStation.getConnectorStatus(firstConnectorId) : undefined
     if (firstConnector != null) {
       firstConnector.reservation = createTestReservation(false)
     }
@@ -762,13 +855,155 @@ await describe('Helpers', async () => {
       connectorsCount: 2,
       stationInfo: { ocppVersion: OCPPVersion.VERSION_201 },
     })
-    const firstEvse = chargingStation.evses.get(1)
-    const firstConnector = firstEvse?.connectors.values().next().value
+    const firstConnectorId = chargingStation.getConnectorIdByEvseId(1)
+    const firstConnector =
+      firstConnectorId != null ? chargingStation.getConnectorStatus(firstConnectorId) : undefined
     if (firstConnector != null) {
       firstConnector.reservation = createTestReservation(true)
     }
 
     // Act & Assert
     assert.strictEqual(hasPendingReservations(chargingStation), false)
+  })
+
+  await describe('resetConnectorStatus', async () => {
+    afterEach(() => {
+      standardCleanup()
+    })
+
+    await it('should be a no-op for undefined input', () => {
+      resetConnectorStatus(undefined)
+    })
+
+    await it('should reset all transaction fields', () => {
+      const connectorStatus: ConnectorStatus = {
+        availability: AvailabilityType.Operative,
+        MeterValues: [],
+        transactionBeginMeterValue: { sampledValue: [], timestamp: new Date() },
+        transactionDeauthorized: true,
+        transactionDeauthorizedEnergyWh: 500,
+        transactionEnergyActiveImportRegisterValue: 1234,
+        transactionEvseSent: true,
+        transactionGroupIdToken: 'group-token',
+        transactionId: 'tx-123',
+        transactionIdTag: 'tag-abc',
+        transactionIdTokenSent: true,
+        transactionPending: true,
+        transactionRemoteStarted: true,
+        transactionSeqNo: 5,
+        transactionStart: new Date(),
+        transactionStarted: true,
+      }
+
+      resetConnectorStatus(connectorStatus)
+
+      assert.strictEqual(connectorStatus.transactionStarted, false)
+      assert.strictEqual(connectorStatus.transactionPending, false)
+      assert.strictEqual(connectorStatus.transactionRemoteStarted, false)
+      assert.strictEqual(connectorStatus.transactionEnergyActiveImportRegisterValue, 0)
+      assert.strictEqual(connectorStatus.transactionId, undefined)
+      assert.strictEqual(connectorStatus.transactionIdTag, undefined)
+      assert.strictEqual(connectorStatus.transactionGroupIdToken, undefined)
+      assert.strictEqual(connectorStatus.transactionStart, undefined)
+      assert.strictEqual(connectorStatus.transactionBeginMeterValue, undefined)
+      assert.strictEqual(connectorStatus.transactionSeqNo, undefined)
+      assert.strictEqual(connectorStatus.transactionEvseSent, undefined)
+      assert.strictEqual(connectorStatus.transactionIdTokenSent, undefined)
+      assert.strictEqual(connectorStatus.transactionDeauthorized, undefined)
+      assert.strictEqual(connectorStatus.transactionDeauthorizedEnergyWh, undefined)
+      assert.strictEqual(connectorStatus.idTagAuthorized, false)
+      assert.strictEqual(connectorStatus.idTagLocalAuthorized, false)
+      assert.strictEqual(connectorStatus.authorizeIdTag, undefined)
+      assert.strictEqual(connectorStatus.localAuthorizeIdTag, undefined)
+    })
+
+    await it('should remove TX_PROFILE charging profiles matching transaction', () => {
+      const txProfile = {
+        chargingProfileId: 1,
+        chargingProfilePurpose: ChargingProfilePurposeType.TX_PROFILE,
+        stackLevel: 0,
+        transactionId: 'tx-123',
+      } as unknown as ChargingProfile
+      const otherProfile = {
+        chargingProfileId: 2,
+        chargingProfilePurpose: ChargingProfilePurposeType.TX_DEFAULT_PROFILE,
+        stackLevel: 0,
+      } as unknown as ChargingProfile
+      const connectorStatus: ConnectorStatus = {
+        availability: AvailabilityType.Operative,
+        chargingProfiles: [txProfile, otherProfile],
+        MeterValues: [],
+        transactionId: 'tx-123',
+        transactionStarted: true,
+      }
+
+      resetConnectorStatus(connectorStatus)
+
+      if (connectorStatus.chargingProfiles == null) {
+        assert.fail('chargingProfiles should not be undefined')
+      }
+      assert.strictEqual(connectorStatus.chargingProfiles.length, 1)
+      assert.strictEqual(
+        connectorStatus.chargingProfiles[0].chargingProfilePurpose,
+        ChargingProfilePurposeType.TX_DEFAULT_PROFILE
+      )
+    })
+
+    await it('should preserve non-transaction fields', () => {
+      const connectorStatus: ConnectorStatus = {
+        availability: AvailabilityType.Operative,
+        MeterValues: [{} as unknown as SampledValueTemplate],
+        status: ConnectorStatusEnum.Available,
+        transactionStarted: true,
+      }
+
+      resetConnectorStatus(connectorStatus)
+
+      assert.strictEqual(connectorStatus.availability, AvailabilityType.Operative)
+      assert.strictEqual(connectorStatus.status, ConnectorStatusEnum.Available)
+      assert.strictEqual(connectorStatus.MeterValues.length, 1)
+    })
+  })
+
+  await describe('getMaxConfiguredNumberOfConnectors', async () => {
+    await it('should return undefined for undefined input', () => {
+      assert.strictEqual(getMaxConfiguredNumberOfConnectors(undefined), undefined)
+    })
+
+    await it('should return undefined for empty array', () => {
+      assert.strictEqual(getMaxConfiguredNumberOfConnectors([]), undefined)
+    })
+
+    await it('should return the number itself for scalar input', () => {
+      assert.strictEqual(getMaxConfiguredNumberOfConnectors(3), 3)
+    })
+
+    await it('should return the worst-case (max) of a non-empty array', () => {
+      assert.strictEqual(getMaxConfiguredNumberOfConnectors([2, 4, 6]), 6)
+      assert.strictEqual(getMaxConfiguredNumberOfConnectors([1]), 1)
+      assert.strictEqual(getMaxConfiguredNumberOfConnectors([5, 1, 3]), 5)
+    })
+  })
+
+  await describe('pickConfiguredNumberOfConnectors', async () => {
+    await it('should return undefined for undefined input', () => {
+      assert.strictEqual(pickConfiguredNumberOfConnectors(undefined), undefined)
+    })
+
+    await it('should return undefined for empty array', () => {
+      assert.strictEqual(pickConfiguredNumberOfConnectors([]), undefined)
+    })
+
+    await it('should return the number itself for scalar input', () => {
+      assert.strictEqual(pickConfiguredNumberOfConnectors(3), 3)
+    })
+
+    await it('should return one of the array elements for non-empty array', () => {
+      const candidates = [2, 4, 6]
+      for (let i = 0; i < 50; i++) {
+        const picked = pickConfiguredNumberOfConnectors(candidates)
+        assert.ok(picked != null && candidates.includes(picked))
+      }
+    })
   })
 })

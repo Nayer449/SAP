@@ -7,8 +7,7 @@ import { millisecondsToSeconds } from 'date-fns'
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 
-import type { ChargingStation } from '../../../../src/charging-station/index.js'
-
+import { buildConfigKey, type ChargingStation } from '../../../../src/charging-station/index.js'
 import { createTestableIncomingRequestService } from '../../../../src/charging-station/ocpp/2.0/__testable__/index.js'
 import { OCPP20IncomingRequestService } from '../../../../src/charging-station/ocpp/2.0/OCPP20IncomingRequestService.js'
 import { OCPP20VariableManager } from '../../../../src/charging-station/ocpp/2.0/OCPP20VariableManager.js'
@@ -32,7 +31,7 @@ import {
   TEST_CHARGING_STATION_BASE_NAME,
   TEST_CONNECTOR_ID_VALID_INSTANCE,
 } from '../../ChargingStationTestConstants.js'
-import { createMockChargingStation } from '../../ChargingStationTestUtils.js'
+import { createMockChargingStation } from '../../helpers/StationHelpers.js'
 import {
   resetLimits,
   resetValueSizeLimits,
@@ -52,12 +51,11 @@ await describe('B05 - Set Variables', async () => {
       baseName: TEST_CHARGING_STATION_BASE_NAME,
       connectorsCount: 3,
       evseConfiguration: { evsesCount: 3 },
-      heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
       stationInfo: {
         ocppStrictCompliance: false,
         ocppVersion: OCPPVersion.VERSION_201,
       },
-      websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+      websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
     })
     mockStation = station
     incomingRequestService = new OCPP20IncomingRequestService()
@@ -76,14 +74,14 @@ await describe('B05 - Set Variables', async () => {
       setVariableData: [
         {
           attributeType: AttributeEnumType.Actual,
-          attributeValue: (Constants.DEFAULT_WEBSOCKET_PING_INTERVAL + 1).toString(),
+          attributeValue: (Constants.DEFAULT_WS_PING_INTERVAL_SECONDS + 1).toString(),
           component: { name: OCPP20ComponentName.ChargingStation },
           variable: { name: OCPP20OptionalVariableName.WebSocketPingInterval },
         },
         {
           attributeType: AttributeEnumType.Actual,
           attributeValue: (
-            millisecondsToSeconds(Constants.DEFAULT_HEARTBEAT_INTERVAL) + 1
+            millisecondsToSeconds(Constants.DEFAULT_HEARTBEAT_INTERVAL_MS) + 1
           ).toString(),
           component: { name: OCPP20ComponentName.OCPPCommCtrlr },
           variable: { name: OCPP20OptionalVariableName.HeartbeatInterval },
@@ -215,7 +213,7 @@ await describe('B05 - Set Variables', async () => {
       setVariableData: [
         // Accepted
         {
-          attributeValue: (Constants.DEFAULT_WEBSOCKET_PING_INTERVAL + 3).toString(),
+          attributeValue: (Constants.DEFAULT_WS_PING_INTERVAL_SECONDS + 3).toString(),
           component: { name: OCPP20ComponentName.ChargingStation },
           variable: { name: OCPP20OptionalVariableName.WebSocketPingInterval },
         },
@@ -235,7 +233,7 @@ await describe('B05 - Set Variables', async () => {
         // Unsupported attribute type (WebSocketPingInterval)
         {
           attributeType: AttributeEnumType.Target,
-          attributeValue: (Constants.DEFAULT_WEBSOCKET_PING_INTERVAL + 10).toString(),
+          attributeValue: (Constants.DEFAULT_WS_PING_INTERVAL_SECONDS + 10).toString(),
           component: { name: OCPP20ComponentName.ChargingStation },
           variable: { name: OCPP20OptionalVariableName.WebSocketPingInterval },
         },
@@ -275,7 +273,7 @@ await describe('B05 - Set Variables', async () => {
       setVariableData: [
         {
           attributeType: AttributeEnumType.Target,
-          attributeValue: (Constants.DEFAULT_WEBSOCKET_PING_INTERVAL + 6).toString(),
+          attributeValue: (Constants.DEFAULT_WS_PING_INTERVAL_SECONDS + 6).toString(),
           component: { name: OCPP20ComponentName.ChargingStation },
           variable: { name: OCPP20OptionalVariableName.WebSocketPingInterval },
         },
@@ -311,8 +309,8 @@ await describe('B05 - Set Variables', async () => {
 
   // FR: B07.FR.10
   await it('should persist HeartbeatInterval and WebSocketPingInterval after setting', () => {
-    const hbNew = (millisecondsToSeconds(Constants.DEFAULT_HEARTBEAT_INTERVAL) + 20).toString()
-    const wsNew = (Constants.DEFAULT_WEBSOCKET_PING_INTERVAL + 20).toString()
+    const hbNew = (millisecondsToSeconds(Constants.DEFAULT_HEARTBEAT_INTERVAL_MS) + 20).toString()
+    const wsNew = (Constants.DEFAULT_WS_PING_INTERVAL_SECONDS + 20).toString()
     const setRequest: OCPP20SetVariablesRequest = {
       setVariableData: [
         {
@@ -401,13 +399,13 @@ await describe('B05 - Set Variables', async () => {
     const request: OCPP20SetVariablesRequest = {
       setVariableData: [
         {
-          attributeValue: (Constants.DEFAULT_WEBSOCKET_PING_INTERVAL + 2).toString(),
+          attributeValue: (Constants.DEFAULT_WS_PING_INTERVAL_SECONDS + 2).toString(),
           component: { name: OCPP20ComponentName.ChargingStation },
           variable: { name: OCPP20OptionalVariableName.WebSocketPingInterval },
         },
         {
           attributeValue: (
-            millisecondsToSeconds(Constants.DEFAULT_HEARTBEAT_INTERVAL) + 2
+            millisecondsToSeconds(Constants.DEFAULT_HEARTBEAT_INTERVAL_MS) + 2
           ).toString(),
           component: { name: OCPP20ComponentName.OCPPCommCtrlr },
           variable: { name: OCPP20OptionalVariableName.HeartbeatInterval },
@@ -510,15 +508,18 @@ await describe('B05 - Set Variables', async () => {
     const postCalcLimit = preEstimate + 10
     upsertConfigurationKey(
       mockStation,
-      OCPP20RequiredVariableName.BytesPerMessage,
+      buildConfigKey(
+        OCPP20ComponentName.DeviceDataCtrlr,
+        OCPP20RequiredVariableName.BytesPerMessage
+      ),
       postCalcLimit.toString(),
       false
     )
-    assert.ok(preEstimate < postCalcLimit)
+    assert.ok(preEstimate < postCalcLimit, 'pre-estimate should be less than post-calc limit')
     const response: { setVariableResult: OCPP20SetVariableResultType[] } =
       testableService.handleRequestSetVariables(mockStation, request)
     const actualSize = Buffer.byteLength(JSON.stringify(response.setVariableResult), 'utf8')
-    assert.ok(actualSize > postCalcLimit)
+    assert.ok(actualSize > postCalcLimit, 'actual response size should exceed post-calc limit')
     assert.strictEqual(response.setVariableResult.length, request.setVariableData.length)
     response.setVariableResult.forEach(r => {
       assert.strictEqual(r.attributeStatus, SetVariableStatusEnumType.Rejected)
@@ -541,7 +542,11 @@ await describe('B05 - Set Variables', async () => {
   await it('should enforce ConfigurationValueSize when ValueSize unset (service propagation)', () => {
     resetValueSizeLimits(mockStation)
     setConfigurationValueSize(mockStation, 100)
-    upsertConfigurationKey(mockStation, OCPP20RequiredVariableName.ValueSize, '')
+    upsertConfigurationKey(
+      mockStation,
+      buildConfigKey(OCPP20ComponentName.DeviceDataCtrlr, OCPP20OptionalVariableName.ValueSize),
+      ''
+    )
     const prefix = 'wss://example.com/'
     const withinLimit = prefix + 'a'.repeat(100 - prefix.length)
     const overLimit = prefix + 'a'.repeat(100 - prefix.length + 1)
@@ -575,7 +580,14 @@ await describe('B05 - Set Variables', async () => {
 
   await it('should enforce ValueSize when ConfigurationValueSize unset (service propagation)', () => {
     resetValueSizeLimits(mockStation)
-    upsertConfigurationKey(mockStation, OCPP20RequiredVariableName.ConfigurationValueSize, '')
+    upsertConfigurationKey(
+      mockStation,
+      buildConfigKey(
+        OCPP20ComponentName.DeviceDataCtrlr,
+        OCPP20OptionalVariableName.ConfigurationValueSize
+      ),
+      ''
+    )
     setValueSize(mockStation, 120)
     const prefix = 'wss://example.com/'
     const withinLimit = prefix + 'b'.repeat(120 - prefix.length)

@@ -5,7 +5,9 @@ import {
   ConfigurationStatus,
   DataTransferStatus,
   GenericStatus,
+  type IncomingRequestCommand,
   MeterValueMeasurand,
+  type RequestCommand,
   ReservationStatus,
   TriggerMessageStatus,
   UnlockStatus,
@@ -66,6 +68,10 @@ export class OCPPConstants {
 
   static readonly OCPP_DATA_TRANSFER_RESPONSE_REJECTED = Object.freeze({
     status: DataTransferStatus.REJECTED,
+  })
+
+  static readonly OCPP_DATA_TRANSFER_RESPONSE_UNKNOWN_MESSAGE_ID = Object.freeze({
+    status: DataTransferStatus.UNKNOWN_MESSAGE_ID,
   })
 
   static readonly OCPP_DATA_TRANSFER_RESPONSE_UNKNOWN_VENDOR_ID = Object.freeze({
@@ -153,7 +159,11 @@ export class OCPPConstants {
     status: TriggerMessageStatus.REJECTED,
   })
 
-  static readonly OCPP_WEBSOCKET_TIMEOUT = 60000 // Ms
+  static readonly OCPP_WEBSOCKET_TIMEOUT_MS = 60000
+
+  static readonly UNKNOWN_OCPP_COMMAND = 'unknown OCPP command' as
+    | IncomingRequestCommand
+    | RequestCommand
 
   protected constructor () {
     // This is intentional

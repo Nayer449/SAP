@@ -1,5 +1,6 @@
 import { millisecondsToSeconds } from 'date-fns'
 
+import { BaseError } from '../../../exception/index.js'
 import {
   AttributeEnumType,
   type ComponentType,
@@ -18,13 +19,15 @@ import {
   SetVariableStatusEnumType,
   type VariableType,
 } from '../../../types/index.js'
-import { Constants, convertToIntOrNaN, logger } from '../../../utils/index.js'
-import { type ChargingStation } from '../../ChargingStation.js'
+import { Constants, convertToIntOrNaN, isEmpty, logger } from '../../../utils/index.js'
 import {
   addConfigurationKey,
+  buildConfigKey,
+  type ChargingStation,
   getConfigurationKey,
   setConfigurationKeyValue,
-} from '../../ConfigurationKeyUtils.js'
+} from '../../index.js'
+import { OCPP20Constants } from './OCPP20Constants.js'
 import {
   applyPostProcess,
   buildCaseInsensitiveCompositeKey,
@@ -43,15 +46,9 @@ const isOCPP20RequiredVariableName = (name: string): name is OCPP20RequiredVaria
   return Object.values(OCPP20RequiredVariableName).includes(name as OCPP20RequiredVariableName)
 }
 
-const shouldFlattenInstance = (variableMetadata: VariableMetadata): boolean => {
-  // TODO: Generalize instance flattening via registry metadata
-  return variableMetadata.variable === (OCPP20RequiredVariableName.MessageAttemptInterval as string)
-}
-const computeConfigurationKeyName = (variableMetadata: VariableMetadata): string => {
-  return variableMetadata.instance != null && !shouldFlattenInstance(variableMetadata)
-    ? `${variableMetadata.variable}.${variableMetadata.instance}`
-    : variableMetadata.variable
-}
+const computeConfigurationKeyName = (variableMetadata: VariableMetadata): string =>
+  buildConfigKey(variableMetadata.component, variableMetadata.variable, variableMetadata.instance)
+
 export class OCPP20VariableManager {
   private static instance: null | OCPP20VariableManager = null
 
@@ -59,10 +56,11 @@ export class OCPP20VariableManager {
     Object.keys(VARIABLE_REGISTRY).map(k => k.split('::')[0])
   )
 
-  private readonly invalidVariables = new Set<string>() // composite key (lower case)
-  private readonly maxSetOverrides = new Map<string, string>() // composite key (lower case)
-  private readonly minSetOverrides = new Map<string, string>() // composite key (lower case)
-  private readonly runtimeOverrides = new Map<string, string>() // composite key (lower case)
+  private readonly invalidVariables = new Map<string, Set<string>>() // stationId → composite keys (lower case)
+  private readonly maxSetOverrides = new Map<string, Map<string, string>>() // stationId → composite key → value
+  private readonly minSetOverrides = new Map<string, Map<string, string>>() // stationId → composite key → value
+  private readonly runtimeOverrides = new Map<string, Map<string, string>>() // stationId → composite key → value
+  private readonly validatedStations = new Set<string>() // stationId
 
   private constructor () {
     /* This is intentional */
@@ -103,8 +101,26 @@ export class OCPP20VariableManager {
     return results
   }
 
-  public resetRuntimeOverrides (): void {
-    this.runtimeOverrides.clear()
+  public invalidateMappingsCache (stationId?: string): void {
+    if (stationId != null) {
+      this.validatedStations.delete(stationId)
+      this.invalidVariables.delete(stationId)
+    } else {
+      this.validatedStations.clear()
+      this.invalidVariables.clear()
+    }
+  }
+
+  public resetRuntimeOverrides (stationId?: string): void {
+    if (stationId != null) {
+      this.runtimeOverrides.delete(stationId)
+      this.minSetOverrides.delete(stationId)
+      this.maxSetOverrides.delete(stationId)
+    } else {
+      this.runtimeOverrides.clear()
+      this.minSetOverrides.clear()
+      this.maxSetOverrides.clear()
+    }
   }
 
   public setVariables (
@@ -112,6 +128,47 @@ export class OCPP20VariableManager {
     setVariableData: OCPP20SetVariableDataType[]
   ): OCPP20SetVariableResultType[] {
     this.validatePersistentMappings(chargingStation)
+    const stationId = this.getStationId(chargingStation)
+
+    // Collect paired MinSet/MaxSet entries for atomic cross-validation
+    const pairedBounds = new Map<string, { maxValue?: string; minValue?: string }>()
+    for (const variableData of setVariableData) {
+      const resolvedAttr = variableData.attributeType ?? AttributeEnumType.Actual
+      if (resolvedAttr !== AttributeEnumType.MinSet && resolvedAttr !== AttributeEnumType.MaxSet) {
+        continue
+      }
+      const varKey = buildCaseInsensitiveCompositeKey(
+        variableData.component.name,
+        variableData.component.instance,
+        variableData.variable.name
+      )
+      const pairedBoundsEntry = pairedBounds.get(varKey) ?? {}
+      if (resolvedAttr === AttributeEnumType.MinSet) {
+        pairedBoundsEntry.minValue = variableData.attributeValue
+      } else {
+        pairedBoundsEntry.maxValue = variableData.attributeValue
+      }
+      pairedBounds.set(varKey, pairedBoundsEntry)
+    }
+
+    // Pre-apply coherent MinSet/MaxSet pairs so per-item cross-check sees paired values
+    const savedOverrides = new Map<
+      string,
+      { prevMax: string | undefined; prevMin: string | undefined }
+    >()
+    for (const [varKey, pair] of pairedBounds) {
+      if (pair.minValue == null || pair.maxValue == null) continue
+      const newMin = convertToIntOrNaN(pair.minValue)
+      const newMax = convertToIntOrNaN(pair.maxValue)
+      if (Number.isNaN(newMin) || Number.isNaN(newMax) || newMin > newMax) continue
+      savedOverrides.set(varKey, {
+        prevMax: this.getMaxSetOverrides(stationId).get(varKey),
+        prevMin: this.getMinSetOverrides(stationId).get(varKey),
+      })
+      this.getMinSetOverrides(stationId).set(varKey, pair.minValue)
+      this.getMaxSetOverrides(stationId).set(varKey, pair.maxValue)
+    }
+
     const results: OCPP20SetVariableResultType[] = []
     for (const variableData of setVariableData) {
       try {
@@ -134,11 +191,63 @@ export class OCPP20VariableManager {
         })
       }
     }
+
+    // Rollback pre-applied overrides for rejected items
+    for (const [varKey, saved] of savedOverrides) {
+      let minRejected = false
+      let maxRejected = false
+      for (let i = 0; i < setVariableData.length; i++) {
+        const data = setVariableData[i]
+        const resolvedAttr = data.attributeType ?? AttributeEnumType.Actual
+        if (
+          resolvedAttr !== AttributeEnumType.MinSet &&
+          resolvedAttr !== AttributeEnumType.MaxSet
+        ) {
+          continue
+        }
+        const itemKey = buildCaseInsensitiveCompositeKey(
+          data.component.name,
+          data.component.instance,
+          data.variable.name
+        )
+        if (itemKey !== varKey) continue
+        if (
+          resolvedAttr === AttributeEnumType.MinSet &&
+          results[i].attributeStatus !== SetVariableStatusEnumType.Accepted
+        ) {
+          minRejected = true
+        }
+        if (
+          resolvedAttr === AttributeEnumType.MaxSet &&
+          results[i].attributeStatus !== SetVariableStatusEnumType.Accepted
+        ) {
+          maxRejected = true
+        }
+      }
+      if (minRejected) {
+        if (saved.prevMin != null) {
+          this.getMinSetOverrides(stationId).set(varKey, saved.prevMin)
+        } else {
+          this.getMinSetOverrides(stationId).delete(varKey)
+        }
+      }
+      if (maxRejected) {
+        if (saved.prevMax != null) {
+          this.getMaxSetOverrides(stationId).set(varKey, saved.prevMax)
+        } else {
+          this.getMaxSetOverrides(stationId).delete(varKey)
+        }
+      }
+    }
+
     return results
   }
 
   public validatePersistentMappings (chargingStation: ChargingStation): void {
-    this.invalidVariables.clear()
+    const stationId = this.getStationId(chargingStation)
+    if (this.validatedStations.has(stationId)) return
+    const invalidVariables = this.getInvalidVariables(stationId)
+    invalidVariables.clear()
     for (const metaKey of Object.keys(VARIABLE_REGISTRY)) {
       const variableMetadata = VARIABLE_REGISTRY[metaKey]
       // Enforce persistent non-write-only variables across components
@@ -160,9 +269,9 @@ export class OCPP20VariableManager {
         // Allow size limit variables to remain intentionally unset.
         if (
           variableMetadata.variable ===
-            (OCPP20RequiredVariableName.ConfigurationValueSize as string) ||
-          variableMetadata.variable === (OCPP20RequiredVariableName.ValueSize as string) ||
-          variableMetadata.variable === (OCPP20RequiredVariableName.ReportingValueSize as string)
+            (OCPP20OptionalVariableName.ConfigurationValueSize as string) ||
+          variableMetadata.variable === (OCPP20OptionalVariableName.ValueSize as string) ||
+          variableMetadata.variable === (OCPP20OptionalVariableName.ReportingValueSize as string)
         ) {
           continue
         }
@@ -180,13 +289,64 @@ export class OCPP20VariableManager {
             `${chargingStation.logPrefix()} Added missing configuration key for variable '${configurationKeyName}' with default '${defaultValue}'`
           )
         } else {
-          this.invalidVariables.add(variableKey)
-          logger.error(
-            `${chargingStation.logPrefix()} Missing configuration key mapping and no default for variable '${configurationKeyName}'`
-          )
+          invalidVariables.add(variableKey)
+          if (variableMetadata.required === true) {
+            logger.error(
+              `${chargingStation.logPrefix()} Missing required configuration key mapping and no default for variable '${configurationKeyName}'`
+            )
+          } else {
+            logger.warn(
+              `${chargingStation.logPrefix()} Missing optional configuration key mapping and no default for variable '${configurationKeyName}'`
+            )
+          }
         }
       }
     }
+    this.validatedStations.add(stationId)
+  }
+
+  private getInvalidVariables (stationId: string): Set<string> {
+    let set = this.invalidVariables.get(stationId)
+    if (set == null) {
+      set = new Set<string>()
+      this.invalidVariables.set(stationId, set)
+    }
+    return set
+  }
+
+  private getMaxSetOverrides (stationId: string): Map<string, string> {
+    let map = this.maxSetOverrides.get(stationId)
+    if (map == null) {
+      map = new Map<string, string>()
+      this.maxSetOverrides.set(stationId, map)
+    }
+    return map
+  }
+
+  private getMinSetOverrides (stationId: string): Map<string, string> {
+    let map = this.minSetOverrides.get(stationId)
+    if (map == null) {
+      map = new Map<string, string>()
+      this.minSetOverrides.set(stationId, map)
+    }
+    return map
+  }
+
+  private getRuntimeOverrides (stationId: string): Map<string, string> {
+    let map = this.runtimeOverrides.get(stationId)
+    if (map == null) {
+      map = new Map<string, string>()
+      this.runtimeOverrides.set(stationId, map)
+    }
+    return map
+  }
+
+  private getStationId (chargingStation: ChargingStation): string {
+    const stationId = chargingStation.stationInfo?.hashId
+    if (stationId == null) {
+      throw new BaseError('ChargingStation has no stationInfo.hashId, cannot identify station')
+    }
+    return stationId
   }
 
   private getVariable (
@@ -196,6 +356,8 @@ export class OCPP20VariableManager {
     const { attributeType, component, variable } = variableData
     const requestedAttributeType = attributeType
     const resolvedAttributeType = requestedAttributeType ?? AttributeEnumType.Actual
+    const stationId = this.getStationId(chargingStation)
+    const invalidVariables = this.getInvalidVariables(stationId)
 
     if (!this.isComponentValid(chargingStation, component)) {
       return this.rejectGet(
@@ -253,7 +415,7 @@ export class OCPP20VariableManager {
       component.instance,
       variable.name
     )
-    if (this.invalidVariables.has(variableKey)) {
+    if (invalidVariables.has(variableKey)) {
       return this.rejectGet(
         variable,
         component,
@@ -265,7 +427,10 @@ export class OCPP20VariableManager {
     }
 
     if (resolvedAttributeType === AttributeEnumType.MinSet) {
-      if (variableMetadata.min === undefined && this.minSetOverrides.get(variableKey) == null) {
+      if (
+        variableMetadata.min === undefined &&
+        this.getMinSetOverrides(stationId).get(variableKey) == null
+      ) {
         return this.rejectGet(
           variable,
           component,
@@ -276,7 +441,7 @@ export class OCPP20VariableManager {
         )
       }
       const minValue =
-        this.minSetOverrides.get(variableKey) ??
+        this.getMinSetOverrides(stationId).get(variableKey) ??
         (variableMetadata.min !== undefined ? variableMetadata.min.toString() : '')
       return {
         attributeStatus: GetVariableStatusEnumType.Accepted,
@@ -287,7 +452,10 @@ export class OCPP20VariableManager {
       }
     }
     if (resolvedAttributeType === AttributeEnumType.MaxSet) {
-      if (variableMetadata.max === undefined && this.maxSetOverrides.get(variableKey) == null) {
+      if (
+        variableMetadata.max === undefined &&
+        this.getMaxSetOverrides(stationId).get(variableKey) == null
+      ) {
         return this.rejectGet(
           variable,
           component,
@@ -298,7 +466,7 @@ export class OCPP20VariableManager {
         )
       }
       const maxValue =
-        this.maxSetOverrides.get(variableKey) ??
+        this.getMaxSetOverrides(stationId).get(variableKey) ??
         (variableMetadata.max !== undefined ? variableMetadata.max.toString() : '')
       return {
         attributeStatus: GetVariableStatusEnumType.Accepted,
@@ -311,7 +479,7 @@ export class OCPP20VariableManager {
 
     let variableValue = this.resolveVariableValue(chargingStation, component, variable)
 
-    if (variableValue.length === 0) {
+    if (isEmpty(variableValue)) {
       if (
         resolvedAttributeType === AttributeEnumType.Target &&
         variableMetadata.supportsTarget === true
@@ -337,25 +505,31 @@ export class OCPP20VariableManager {
 
     // ReportingValueSize truncation (DeviceDataCtrlr authoritative)
     const reportingValueSizeKey = buildCaseInsensitiveCompositeKey(
-      OCPP20ComponentName.DeviceDataCtrlr as string,
+      OCPP20ComponentName.DeviceDataCtrlr,
       undefined,
-      OCPP20RequiredVariableName.ReportingValueSize as string
+      OCPP20OptionalVariableName.ReportingValueSize
     )
     // ValueSize truncation applied before ReportingValueSize if present
     const valueSizeKey = buildCaseInsensitiveCompositeKey(
-      OCPP20ComponentName.DeviceDataCtrlr as string,
+      OCPP20ComponentName.DeviceDataCtrlr,
       undefined,
-      OCPP20RequiredVariableName.ValueSize as string
+      OCPP20OptionalVariableName.ValueSize
     )
     let valueSize: string | undefined
     let reportingValueSize: string | undefined
-    if (!this.invalidVariables.has(valueSizeKey)) {
-      valueSize = getConfigurationKey(chargingStation, OCPP20RequiredVariableName.ValueSize)?.value
+    if (!invalidVariables.has(valueSizeKey)) {
+      valueSize = getConfigurationKey(
+        chargingStation,
+        buildConfigKey(OCPP20ComponentName.DeviceDataCtrlr, OCPP20OptionalVariableName.ValueSize)
+      )?.value
     }
-    if (!this.invalidVariables.has(reportingValueSizeKey)) {
+    if (!invalidVariables.has(reportingValueSizeKey)) {
       reportingValueSize = getConfigurationKey(
         chargingStation,
-        OCPP20RequiredVariableName.ReportingValueSize
+        buildConfigKey(
+          OCPP20ComponentName.DeviceDataCtrlr,
+          OCPP20OptionalVariableName.ReportingValueSize
+        )
       )?.value
     }
     // Apply ValueSize first then ReportingValueSize
@@ -366,9 +540,9 @@ export class OCPP20VariableManager {
       variableValue = enforceReportingValueSize(variableValue, reportingValueSize)
     }
 
-    // Final absolute length enforcement (spec maxLength Constants.OCPP_VALUE_ABSOLUTE_MAX_LENGTH)
-    if (variableValue.length > Constants.OCPP_VALUE_ABSOLUTE_MAX_LENGTH) {
-      variableValue = variableValue.slice(0, Constants.OCPP_VALUE_ABSOLUTE_MAX_LENGTH)
+    // Final absolute length enforcement (spec maxLength OCPP20Constants.MAX_VARIABLE_VALUE_LENGTH)
+    if (variableValue.length > OCPP20Constants.MAX_VARIABLE_VALUE_LENGTH) {
+      variableValue = variableValue.slice(0, OCPP20Constants.MAX_VARIABLE_VALUE_LENGTH)
     }
     return {
       attributeStatus: GetVariableStatusEnumType.Accepted,
@@ -481,7 +655,8 @@ export class OCPP20VariableManager {
       variableMetadata.persistence === PersistenceEnumType.Volatile &&
       variableMetadata.mutability !== MutabilityEnumType.ReadOnly
     ) {
-      const override = this.runtimeOverrides.get(compositeKey)
+      const stationId = this.getStationId(chargingStation)
+      const override = this.getRuntimeOverrides(stationId).get(compositeKey)
       if (override != null) {
         value = override
       }
@@ -503,7 +678,7 @@ export class OCPP20VariableManager {
       variableMetadata.variable === (OCPP20RequiredVariableName.TxUpdatedInterval as string) &&
       !value
     ) {
-      value = Constants.DEFAULT_TX_UPDATED_INTERVAL.toString()
+      value = Constants.DEFAULT_TX_UPDATED_INTERVAL_SECONDS.toString()
     }
 
     value = applyPostProcess(chargingStation, variableMetadata, value)
@@ -516,6 +691,8 @@ export class OCPP20VariableManager {
   ): OCPP20SetVariableResultType {
     const { attributeType, attributeValue, component, variable } = variableData
     const resolvedAttributeType = attributeType ?? AttributeEnumType.Actual
+    const stationId = this.getStationId(chargingStation)
+    const invalidVariables = this.getInvalidVariables(stationId)
 
     if (!this.isComponentValid(chargingStation, component)) {
       return this.rejectSet(
@@ -559,10 +736,7 @@ export class OCPP20VariableManager {
       component.instance,
       variable.name
     )
-    if (
-      this.invalidVariables.has(variableKey) &&
-      resolvedAttributeType === AttributeEnumType.Actual
-    ) {
+    if (invalidVariables.has(variableKey) && resolvedAttributeType === AttributeEnumType.Actual) {
       if (variableMetadata.mutability !== MutabilityEnumType.WriteOnly) {
         return this.rejectSet(
           variable,
@@ -573,7 +747,7 @@ export class OCPP20VariableManager {
           'Variable mapping invalid (startup self-check failed)'
         )
       } else {
-        this.invalidVariables.delete(variableKey)
+        invalidVariables.delete(variableKey)
       }
     }
 
@@ -646,7 +820,7 @@ export class OCPP20VariableManager {
       }
       if (resolvedAttributeType === AttributeEnumType.MinSet) {
         const currentMax =
-          this.maxSetOverrides.get(variableKey) ??
+          this.getMaxSetOverrides(stationId).get(variableKey) ??
           (variableMetadata.max !== undefined ? variableMetadata.max.toString() : undefined)
         if (currentMax != null && intValue > convertToIntOrNaN(currentMax)) {
           return this.rejectSet(
@@ -658,10 +832,10 @@ export class OCPP20VariableManager {
             'MinSet higher than MaxSet'
           )
         }
-        this.minSetOverrides.set(variableKey, attributeValue)
+        this.getMinSetOverrides(stationId).set(variableKey, attributeValue)
       } else {
         const currentMin =
-          this.minSetOverrides.get(variableKey) ??
+          this.getMinSetOverrides(stationId).get(variableKey) ??
           (variableMetadata.min !== undefined ? variableMetadata.min.toString() : undefined)
         if (currentMin != null && intValue < convertToIntOrNaN(currentMin)) {
           return this.rejectSet(
@@ -673,7 +847,7 @@ export class OCPP20VariableManager {
             'MaxSet lower than MinSet'
           )
         }
-        this.maxSetOverrides.set(variableKey, attributeValue)
+        this.getMaxSetOverrides(stationId).set(variableKey, attributeValue)
       }
       return {
         attributeStatus: SetVariableStatusEnumType.Accepted,
@@ -699,32 +873,35 @@ export class OCPP20VariableManager {
     // 1. Read ConfigurationValueSize and ValueSize if present and valid (>0).
     // 2. If both valid, use the smaller positive value.
     // 3. If only one valid, use that value.
-    // 4. If neither valid/positive, fallback to spec maxLength (Constants.OCPP_VALUE_ABSOLUTE_MAX_LENGTH).
-    // 5. Enforce absolute upper cap of Constants.OCPP_VALUE_ABSOLUTE_MAX_LENGTH (spec).
+    // 4. If neither valid/positive, fallback to spec maxLength (OCPP20Constants.MAX_VARIABLE_VALUE_LENGTH).
+    // 5. Enforce absolute upper cap of OCPP20Constants.MAX_VARIABLE_VALUE_LENGTH (spec).
     // 6. Reject with TooLargeElement when attributeValue length strictly exceeds effectiveLimit.
     if (resolvedAttributeType === AttributeEnumType.Actual) {
       const configurationValueSizeKey = buildCaseInsensitiveCompositeKey(
-        OCPP20ComponentName.DeviceDataCtrlr as string,
+        OCPP20ComponentName.DeviceDataCtrlr,
         undefined,
-        OCPP20RequiredVariableName.ConfigurationValueSize as string
+        OCPP20OptionalVariableName.ConfigurationValueSize
       )
       const valueSizeKey = buildCaseInsensitiveCompositeKey(
-        OCPP20ComponentName.DeviceDataCtrlr as string,
+        OCPP20ComponentName.DeviceDataCtrlr,
         undefined,
-        OCPP20RequiredVariableName.ValueSize as string
+        OCPP20OptionalVariableName.ValueSize
       )
       let configurationValueSizeRaw: string | undefined
       let valueSizeRaw: string | undefined
-      if (!this.invalidVariables.has(configurationValueSizeKey)) {
+      if (!invalidVariables.has(configurationValueSizeKey)) {
         configurationValueSizeRaw = getConfigurationKey(
           chargingStation,
-          OCPP20RequiredVariableName.ConfigurationValueSize
+          buildConfigKey(
+            OCPP20ComponentName.DeviceDataCtrlr,
+            OCPP20OptionalVariableName.ConfigurationValueSize
+          )
         )?.value
       }
-      if (!this.invalidVariables.has(valueSizeKey)) {
+      if (!invalidVariables.has(valueSizeKey)) {
         valueSizeRaw = getConfigurationKey(
           chargingStation,
-          OCPP20RequiredVariableName.ValueSize
+          buildConfigKey(OCPP20ComponentName.DeviceDataCtrlr, OCPP20OptionalVariableName.ValueSize)
         )?.value
       }
       const cfgLimit = convertToIntOrNaN(configurationValueSizeRaw ?? '')
@@ -737,10 +914,10 @@ export class OCPP20VariableManager {
         effectiveLimit = effectiveLimit != null ? Math.min(effectiveLimit, valLimit) : valLimit
       }
       if (effectiveLimit == null || effectiveLimit <= 0) {
-        effectiveLimit = Constants.OCPP_VALUE_ABSOLUTE_MAX_LENGTH
+        effectiveLimit = OCPP20Constants.MAX_VARIABLE_VALUE_LENGTH
       }
-      if (effectiveLimit > Constants.OCPP_VALUE_ABSOLUTE_MAX_LENGTH) {
-        effectiveLimit = Constants.OCPP_VALUE_ABSOLUTE_MAX_LENGTH
+      if (effectiveLimit > OCPP20Constants.MAX_VARIABLE_VALUE_LENGTH) {
+        effectiveLimit = OCPP20Constants.MAX_VARIABLE_VALUE_LENGTH
       }
       if (attributeValue.length > effectiveLimit) {
         return this.rejectSet(
@@ -761,7 +938,8 @@ export class OCPP20VariableManager {
       isOCPP20RequiredVariableName(variable.name) &&
       variable.name === OCPP20RequiredVariableName.AuthorizeRemoteStart
     ) {
-      if (attributeValue !== 'true' && attributeValue !== 'false') {
+      const normalizedValue = attributeValue.toLowerCase()
+      if (normalizedValue !== 'true' && normalizedValue !== 'false') {
         return this.rejectSet(
           variable,
           component,
@@ -787,8 +965,8 @@ export class OCPP20VariableManager {
       if (variableMetadata.dataType === DataEnumType.integer) {
         const num = convertToIntOrNaN(attributeValue)
         if (!Number.isNaN(num)) {
-          const overrideMinRaw = this.minSetOverrides.get(variableKey)
-          const overrideMaxRaw = this.maxSetOverrides.get(variableKey)
+          const overrideMinRaw = this.getMinSetOverrides(stationId).get(variableKey)
+          const overrideMaxRaw = this.getMaxSetOverrides(stationId).get(variableKey)
           if (overrideMinRaw != null) {
             const overrideMin = convertToIntOrNaN(overrideMinRaw)
             if (!Number.isNaN(overrideMin) && num < overrideMin) {
@@ -857,7 +1035,7 @@ export class OCPP20VariableManager {
     }
     // Apply volatile runtime override generically (single location)
     if (variableMetadata.persistence === PersistenceEnumType.Volatile) {
-      this.runtimeOverrides.set(variableKey, attributeValue)
+      this.getRuntimeOverrides(stationId).set(variableKey, attributeValue)
     }
 
     if (rebootRequired) {

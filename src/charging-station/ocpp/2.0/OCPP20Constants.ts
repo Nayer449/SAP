@@ -2,6 +2,8 @@ import {
   type ConnectorStatusTransition,
   MessageTriggerEnumType,
   OCPP20ConnectorStatusEnumType,
+  type OCPP20SendLocalListResponse,
+  OCPP20SendLocalListStatusEnumType,
   OCPP20TriggerReasonEnumType,
 } from '../../../types/index.js'
 import { OCPPConstants } from '../OCPPConstants.js'
@@ -138,11 +140,43 @@ export class OCPP20Constants extends OCPPConstants {
     // { from: OCPP20ConnectorStatusEnumType.Faulted, to: OCPP20ConnectorStatusEnumType.Faulted }
   ])
 
+  static readonly DEFAULT_CONNECTION_URL = 'ws://localhost'
+
+  static readonly FIRMWARE_INSTALL_DELAY_MS = 5000
+  static readonly FIRMWARE_STATUS_DELAY_MS = 2000
+  static readonly FIRMWARE_VERIFY_DELAY_MS = 500
   /**
    * Default timeout in milliseconds for async OCPP 2.0 handler operations
    * (e.g., certificate file I/O). Prevents handlers from hanging indefinitely.
    */
   static readonly HANDLER_TIMEOUT_MS = 30_000
+
+  static readonly LOG_UPLOAD_STEP_DELAY_MS = 1000
+
+  static readonly MAX_SECURITY_EVENT_SEND_ATTEMPTS = 3
+
+  static readonly MAX_VARIABLE_VALUE_LENGTH = 2500
+
+  static readonly OCPP_SEND_LOCAL_LIST_RESPONSE_ACCEPTED: OCPP20SendLocalListResponse =
+    Object.freeze({
+      status: OCPP20SendLocalListStatusEnumType.Accepted,
+    })
+
+  static readonly OCPP_SEND_LOCAL_LIST_RESPONSE_FAILED: OCPP20SendLocalListResponse = Object.freeze(
+    {
+      status: OCPP20SendLocalListStatusEnumType.Failed,
+    }
+  )
+
+  static readonly OCPP_SEND_LOCAL_LIST_RESPONSE_VERSION_MISMATCH: OCPP20SendLocalListResponse =
+    Object.freeze({
+      status: OCPP20SendLocalListStatusEnumType.VersionMismatch,
+    })
+
+  static readonly RESET_DELAY_MS = 1000
+  static readonly RESET_IDLE_MONITOR_INTERVAL_MS = 5000
+
+  static readonly SECURITY_EVENT_RETRY_DELAY_MS = 5000
 
   /**
    * Set of MessageTriggerEnumType values that the charging station supports

@@ -33,21 +33,39 @@ export enum OCPP20DeviceInfoVariableName {
 }
 
 export enum OCPP20OptionalVariableName {
+  AllowReset = 'AllowReset',
+  CertSigningRepeatTimes = 'CertSigningRepeatTimes',
+  CertSigningWaitMinimum = 'CertSigningWaitMinimum',
+  ConfigurationValueSize = 'ConfigurationValueSize',
   HeartbeatInterval = 'HeartbeatInterval',
+  MasterPassGroupId = 'MasterPassGroupId',
+  MaxCertificateChainSize = 'MaxCertificateChainSize',
+  MaxEnergyOnInvalidId = 'MaxEnergyOnInvalidId',
+  NonEvseSpecific = 'NonEvseSpecific',
+  PublicKeyWithSignedMeterValue = 'PublicKeyWithSignedMeterValue',
+  ReportingValueSize = 'ReportingValueSize',
+  RetryBackOffRandomRange = 'RetryBackOffRandomRange',
+  RetryBackOffRepeatTimes = 'RetryBackOffRepeatTimes',
+  RetryBackOffWaitMinimum = 'RetryBackOffWaitMinimum',
+  SignReadings = 'SignReadings',
+  ValueSize = 'ValueSize',
   WebSocketPingInterval = 'WebSocketPingInterval',
 }
 
 export enum OCPP20RequiredVariableName {
+  AlignedDataInterval = 'Interval',
   AuthorizeRemoteStart = 'AuthorizeRemoteStart',
   BytesPerMessage = 'BytesPerMessage',
   CertificateEntries = 'CertificateEntries',
-  ConfigurationValueSize = 'ConfigurationValueSize',
   DateTime = 'DateTime',
+  Enabled = 'Enabled',
+  Entries = 'Entries',
   EVConnectionTimeOut = 'EVConnectionTimeOut',
   FileTransferProtocols = 'FileTransferProtocols',
   ItemsPerMessage = 'ItemsPerMessage',
-  LocalAuthorizeOffline = 'LocalAuthorizeOffline',
-  LocalPreAuthorize = 'LocalPreAuthorize',
+  LocalAuthorizationOffline = 'LocalAuthorizationOffline',
+  LocalPreAuthorization = 'LocalPreAuthorization',
+  Measurands = 'Measurands',
   MessageAttemptInterval = 'MessageAttemptInterval',
   MessageAttempts = 'MessageAttempts',
   MessageTimeout = 'MessageTimeout',
@@ -55,12 +73,12 @@ export enum OCPP20RequiredVariableName {
   NetworkProfileConnectionAttempts = 'NetworkProfileConnectionAttempts',
   OfflineThreshold = 'OfflineThreshold',
   OrganizationName = 'OrganizationName',
-  ReportingValueSize = 'ReportingValueSize',
   ResetRetries = 'ResetRetries',
   SecurityProfile = 'SecurityProfile',
   StopTxOnEVSideDisconnect = 'StopTxOnEVSideDisconnect',
   StopTxOnInvalidId = 'StopTxOnInvalidId',
   TimeSource = 'TimeSource',
+  TxEndedInterval = 'TxEndedInterval',
   TxEndedMeasurands = 'TxEndedMeasurands',
   TxStartedMeasurands = 'TxStartedMeasurands',
   TxStartPoint = 'TxStartPoint',
@@ -68,12 +86,16 @@ export enum OCPP20RequiredVariableName {
   TxUpdatedInterval = 'TxUpdatedInterval',
   TxUpdatedMeasurands = 'TxUpdatedMeasurands',
   UnlockOnEVSideDisconnect = 'UnlockOnEVSideDisconnect',
-  ValueSize = 'ValueSize',
 }
 
 export enum OCPP20VendorVariableName {
   CertificatePrivateKey = 'CertificatePrivateKey',
   ConnectionUrl = 'ConnectionUrl',
+  PublicKey = 'PublicKey',
+  SigningMethod = 'SigningMethod',
+  SignStartedReadings = 'SignStartedReadings',
+  SignUpdatedReadings = 'SignUpdatedReadings',
+  SimulateSignatureVerificationFailure = 'SimulateSignatureVerificationFailure',
 }
 
 export enum PersistenceEnumType {
@@ -133,7 +155,7 @@ export interface ReportDataType extends JsonObject {
   component: ComponentType
   customData?: CustomDataType
   variable: VariableType
-  variableAttribute?: VariableAttributeType[]
+  variableAttribute: VariableAttributeType[]
   variableCharacteristics?: VariableCharacteristicsType
 }
 
@@ -151,7 +173,7 @@ export interface VariableType extends JsonObject {
 }
 
 interface VariableAttributeType extends JsonObject {
-  type?: string
+  type?: AttributeEnumType
   value?: string
 }
 

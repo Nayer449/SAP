@@ -96,14 +96,12 @@ build/config.gypi
 .netrwhist
 *~
 
-# Clinic
-*.clinic-*
-
 # System Files
 .DS_Store
 Thumbs.db
 
 # oh-my-opencode
+.omo/
 .sisyphus/
 
 # Winston
@@ -118,9 +116,12 @@ package-lock.json
 
 *.bak
 .eslintcache
+.mypy_cache/
+.pytest_cache/
 temp/
 *.tar.gz
 /performance/
 performanceRecords.json
 performanceRecords.json.lock
 *.db
+.hermes/

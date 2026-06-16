@@ -13,19 +13,21 @@
     "poolMinSize": 1,
     "poolMaxSize": 1
   },
+  "performanceStorage": {
+    "enabled": true,
+    "type": "none"
+  },
   "uiServer": {
     "enabled": true,
+    "version": "1.1",
     "options": {
       "host": "0.0.0.0",
-      "port": 10000,
-      "trustProxy": true
+      "trustProxy": true,
+      "port": 10000
     },
     "type": "ws",
     "authentication": {
-      "enabled": true,
-      "type": "protocol-basic-auth",
-      "username": "admin",
-      "password": "admin"
+      "enabled": false
     }
   },
   "stationTemplateUrls": [
@@ -40,7 +42,6 @@
     {
       "file": "virtual-simple.station-template.json",
       "numberOfStations": 0
-    },
-
+    }
   ]
 }

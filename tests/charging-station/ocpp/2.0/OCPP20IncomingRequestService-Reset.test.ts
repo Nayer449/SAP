@@ -7,12 +7,11 @@ import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 
 import type {
-  EvseStatus,
   OCPP20ResetRequest,
   OCPP20ResetResponse,
   Reservation,
 } from '../../../../src/types/index.js'
-import type { MockChargingStation } from '../../ChargingStationTestUtils.js'
+import type { MockChargingStation } from '../../helpers/StationHelpers.js'
 
 import { createTestableIncomingRequestService } from '../../../../src/charging-station/ocpp/2.0/__testable__/index.js'
 import { OCPP20IncomingRequestService } from '../../../../src/charging-station/ocpp/2.0/OCPP20IncomingRequestService.js'
@@ -306,8 +305,10 @@ await describe('B11 & B12 - Reset', async () => {
         await it('should return Rejected/FwUpdateInProgress when firmware is Downloading', async () => {
           const station = createTestStation()
           // Firmware check runs before OnIdle idle-state logic — always returns Rejected
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          Object.assign(station.stationInfo!, {
+          if (station.stationInfo == null) {
+            throw new Error('Expected stationInfo to be defined')
+          }
+          Object.assign(station.stationInfo, {
             firmwareStatus: FirmwareStatus.Downloading,
           })
 
@@ -328,8 +329,10 @@ await describe('B11 & B12 - Reset', async () => {
         await it('should return Rejected/FwUpdateInProgress when firmware is Downloaded', async () => {
           const station = createTestStation()
           // Firmware check runs before OnIdle idle-state logic — always returns Rejected
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          Object.assign(station.stationInfo!, {
+          if (station.stationInfo == null) {
+            throw new Error('Expected stationInfo to be defined')
+          }
+          Object.assign(station.stationInfo, {
             firmwareStatus: FirmwareStatus.Downloaded,
           })
 
@@ -350,8 +353,10 @@ await describe('B11 & B12 - Reset', async () => {
         await it('should return Rejected/FwUpdateInProgress when firmware is Installing', async () => {
           const station = createTestStation()
           // Firmware check runs before OnIdle idle-state logic — always returns Rejected
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          Object.assign(station.stationInfo!, {
+          if (station.stationInfo == null) {
+            throw new Error('Expected stationInfo to be defined')
+          }
+          Object.assign(station.stationInfo, {
             firmwareStatus: FirmwareStatus.Installing,
           })
 
@@ -372,8 +377,10 @@ await describe('B11 & B12 - Reset', async () => {
         await it('should return Accepted when firmware is Installed (complete)', async () => {
           const station = createTestStation()
           // Firmware status: Installed (complete)
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          Object.assign(station.stationInfo!, {
+          if (station.stationInfo == null) {
+            throw new Error('Expected stationInfo to be defined')
+          }
+          Object.assign(station.stationInfo, {
             firmwareStatus: FirmwareStatus.Installed,
           })
 
@@ -393,8 +400,10 @@ await describe('B11 & B12 - Reset', async () => {
         await it('should return Accepted when firmware status is Idle', async () => {
           const station = createTestStation()
           // Firmware status: Idle
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          Object.assign(station.stationInfo!, {
+          if (station.stationInfo == null) {
+            throw new Error('Expected stationInfo to be defined')
+          }
+          Object.assign(station.stationInfo, {
             firmwareStatus: FirmwareStatus.Idle,
           })
 
@@ -426,13 +435,11 @@ await describe('B11 & B12 - Reset', async () => {
           }
 
           // Assign reservation to first connector
-          const evse: EvseStatus | undefined = station.evses.get(1)
-          if (evse) {
-            const connectorId = [...evse.connectors.keys()][0]
-            const connector = evse.connectors.get(connectorId)
-            if (connector) {
-              connector.reservation = mockReservation as Reservation
-            }
+          const connectorId = station.getConnectorIdByEvseId(1)
+          const connectorStatus =
+            connectorId != null ? station.getConnectorStatus(connectorId) : undefined
+          if (connectorStatus != null) {
+            connectorStatus.reservation = mockReservation as Reservation
           }
 
           const resetRequest: OCPP20ResetRequest = {
@@ -459,13 +466,11 @@ await describe('B11 & B12 - Reset', async () => {
           }
 
           // Assign expired reservation to first connector
-          const evse: EvseStatus | undefined = station.evses.get(1)
-          if (evse) {
-            const connectorId = [...evse.connectors.keys()][0]
-            const connector = evse.connectors.get(connectorId)
-            if (connector) {
-              connector.reservation = mockReservation as Reservation
-            }
+          const connectorId = station.getConnectorIdByEvseId(1)
+          const connectorStatus =
+            connectorId != null ? station.getConnectorStatus(connectorId) : undefined
+          if (connectorStatus != null) {
+            connectorStatus.reservation = mockReservation as Reservation
           }
 
           const resetRequest: OCPP20ResetRequest = {
@@ -508,8 +513,10 @@ await describe('B11 & B12 - Reset', async () => {
           // No transactions
           station.getNumberOfRunningTransactions = () => 0
           // No firmware update
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-          Object.assign(station.stationInfo!, {
+          if (station.stationInfo == null) {
+            throw new Error('Expected stationInfo to be defined')
+          }
+          Object.assign(station.stationInfo, {
             firmwareStatus: FirmwareStatus.Idle,
           })
           // No reservations (default)
@@ -538,13 +545,11 @@ await describe('B11 & B12 - Reset', async () => {
             id: 1,
             idTag: 'test-tag',
           }
-          const evse: EvseStatus | undefined = station.evses.get(1)
-          if (evse) {
-            const connectorId = [...evse.connectors.keys()][0]
-            const connector = evse.connectors.get(connectorId)
-            if (connector) {
-              connector.reservation = mockReservation as Reservation
-            }
+          const connectorId = station.getConnectorIdByEvseId(1)
+          const connectorStatus =
+            connectorId != null ? station.getConnectorStatus(connectorId) : undefined
+          if (connectorStatus != null) {
+            connectorStatus.reservation = mockReservation as Reservation
           }
 
           const resetRequest: OCPP20ResetRequest = {

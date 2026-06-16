@@ -1,5 +1,5 @@
 import type { EmptyObject } from '../../EmptyObject.js'
-import type { JsonObject } from '../../JsonType.js'
+import type { JsonObject, JsonType } from '../../JsonType.js'
 import type { UUIDv4 } from '../../UUID.js'
 import type {
   BootReasonEnumType,
@@ -8,7 +8,6 @@ import type {
   CertificateSigningUseEnumType,
   ChargingStationType,
   CustomDataType,
-  FirmwareStatusEnumType,
   FirmwareType,
   GetCertificateIdUseEnumType,
   InstallCertificateUseEnumType,
@@ -16,8 +15,9 @@ import type {
   LogParametersType,
   MessageTriggerEnumType,
   NetworkConnectionProfileType,
+  OCPP20FirmwareStatusEnumType,
+  OCPP20OperationalStatusEnumType,
   OCSPRequestDataType,
-  OperationalStatusEnumType,
   ReportBaseEnumType,
   ResetEnumType,
   UploadLogStatusEnumType,
@@ -26,6 +26,7 @@ import type {
   OCPP20ChargingProfileType,
   OCPP20ConnectorStatusEnumType,
   OCPP20EVSEType,
+  OCPP20IdTokenInfoType,
   OCPP20IdTokenType,
 } from './Transaction.js'
 import type {
@@ -43,6 +44,7 @@ export enum OCPP20IncomingRequestCommand {
   DELETE_CERTIFICATE = 'DeleteCertificate',
   GET_BASE_REPORT = 'GetBaseReport',
   GET_INSTALLED_CERTIFICATE_IDS = 'GetInstalledCertificateIds',
+  GET_LOCAL_LIST_VERSION = 'GetLocalListVersion',
   GET_LOG = 'GetLog',
   GET_TRANSACTION_STATUS = 'GetTransactionStatus',
   GET_VARIABLES = 'GetVariables',
@@ -50,6 +52,7 @@ export enum OCPP20IncomingRequestCommand {
   REQUEST_START_TRANSACTION = 'RequestStartTransaction',
   REQUEST_STOP_TRANSACTION = 'RequestStopTransaction',
   RESET = 'Reset',
+  SEND_LOCAL_LIST = 'SendLocalList',
   SET_NETWORK_PROFILE = 'SetNetworkProfile',
   SET_VARIABLES = 'SetVariables',
   TRIGGER_MESSAGE = 'TriggerMessage',
@@ -58,7 +61,9 @@ export enum OCPP20IncomingRequestCommand {
 }
 
 export enum OCPP20RequestCommand {
+  AUTHORIZE = 'Authorize',
   BOOT_NOTIFICATION = 'BootNotification',
+  DATA_TRANSFER = 'DataTransfer',
   FIRMWARE_STATUS_NOTIFICATION = 'FirmwareStatusNotification',
   GET_15118_EV_CERTIFICATE = 'Get15118EVCertificate',
   GET_CERTIFICATE_STATUS = 'GetCertificateStatus',
@@ -71,6 +76,22 @@ export enum OCPP20RequestCommand {
   SIGN_CERTIFICATE = 'SignCertificate',
   STATUS_NOTIFICATION = 'StatusNotification',
   TRANSACTION_EVENT = 'TransactionEvent',
+}
+
+export enum OCPP20UpdateEnumType {
+  Differential = 'Differential',
+  Full = 'Full',
+}
+
+export interface OCPP20AuthorizationData extends JsonObject {
+  customData?: CustomDataType
+  idToken: OCPP20IdTokenType
+  idTokenInfo?: OCPP20IdTokenInfoType
+}
+
+export interface OCPP20AuthorizeRequest extends JsonObject {
+  customData?: CustomDataType
+  idToken: OCPP20IdTokenType
 }
 
 export interface OCPP20BootNotificationRequest extends JsonObject {
@@ -88,7 +109,7 @@ export interface OCPP20CertificateSignedRequest extends JsonObject {
 export interface OCPP20ChangeAvailabilityRequest extends JsonObject {
   customData?: CustomDataType
   evse?: OCPP20EVSEType
-  operationalStatus: OperationalStatusEnumType
+  operationalStatus: OCPP20OperationalStatusEnumType
 }
 
 export type OCPP20ClearCacheRequest = EmptyObject
@@ -105,7 +126,7 @@ export interface OCPP20CustomerInformationRequest extends JsonObject {
 
 export interface OCPP20DataTransferRequest extends JsonObject {
   customData?: CustomDataType
-  data?: JsonObject
+  data?: JsonType
   messageId?: string
   vendorId: string
 }
@@ -118,7 +139,7 @@ export interface OCPP20DeleteCertificateRequest extends JsonObject {
 export interface OCPP20FirmwareStatusNotificationRequest extends JsonObject {
   customData?: CustomDataType
   requestId?: number
-  status: FirmwareStatusEnumType
+  status: OCPP20FirmwareStatusEnumType
 }
 
 export interface OCPP20Get15118EVCertificateRequest extends JsonObject {
@@ -143,6 +164,8 @@ export interface OCPP20GetInstalledCertificateIdsRequest extends JsonObject {
   certificateType?: GetCertificateIdUseEnumType[]
   customData?: CustomDataType
 }
+
+export type OCPP20GetLocalListVersionRequest = EmptyObject
 
 export interface OCPP20GetLogRequest extends JsonObject {
   customData?: CustomDataType
@@ -220,6 +243,13 @@ export interface OCPP20SecurityEventNotificationRequest extends JsonObject {
   techInfo?: string
   timestamp: Date
   type: string
+}
+
+export interface OCPP20SendLocalListRequest extends JsonObject {
+  customData?: CustomDataType
+  localAuthorizationList?: OCPP20AuthorizationData[]
+  updateType: OCPP20UpdateEnumType
+  versionNumber: number
 }
 
 export interface OCPP20SetNetworkProfileRequest extends JsonObject {

@@ -1,17 +1,22 @@
-import type { ChargingStation } from '../../../ChargingStation.js'
-import type { OCPP16AuthAdapter } from '../adapters/OCPP16AuthAdapter.js'
-import type { OCPP20AuthAdapter } from '../adapters/OCPP20AuthAdapter.js'
+import type { ChargingStation } from '../../../index.js'
 import type {
   AuthCache,
   AuthStrategy,
   LocalAuthListManager,
+  OCPPAuthAdapter,
 } from '../interfaces/OCPPAuthService.js'
 import type { AuthConfiguration } from '../types/AuthTypes.js'
 
-import { OCPPError } from '../../../../exception/OCPPError.js'
-import { ErrorType } from '../../../../types/index.js'
-import { OCPPVersion } from '../../../../types/ocpp/OCPPVersion.js'
+import { OCPPError } from '../../../../exception/index.js'
+import { ErrorType, OCPPVersion } from '../../../../types/index.js'
+import { Constants } from '../../../../utils/index.js'
+import { OCPP16AuthAdapter } from '../adapters/OCPP16AuthAdapter.js'
+import { OCPP20AuthAdapter } from '../adapters/OCPP20AuthAdapter.js'
 import { InMemoryAuthCache } from '../cache/InMemoryAuthCache.js'
+import { InMemoryLocalAuthListManager } from '../cache/InMemoryLocalAuthListManager.js'
+import { CertificateAuthStrategy } from '../strategies/CertificateAuthStrategy.js'
+import { LocalAuthStrategy } from '../strategies/LocalAuthStrategy.js'
+import { RemoteAuthStrategy } from '../strategies/RemoteAuthStrategy.js'
 import { AuthConfigValidator } from '../utils/ConfigValidator.js'
 
 /**
@@ -33,15 +38,12 @@ import { AuthConfigValidator } from '../utils/ConfigValidator.js'
 // eslint-disable-next-line @typescript-eslint/no-extraneous-class
 export class AuthComponentFactory {
   /**
-   * Create OCPP adapters based on charging station version
+   * Create OCPP adapter based on charging station version
    * @param chargingStation - Charging station instance used to determine OCPP version
-   * @returns Object containing version-specific adapter (OCPP 1.6 or 2.0.x)
+   * @returns Single version-specific adapter (OCPP 1.6 or 2.0.x)
    * @throws {Error} When OCPP version is not found or unsupported
    */
-  static async createAdapters (chargingStation: ChargingStation): Promise<{
-    ocpp16Adapter?: OCPP16AuthAdapter
-    ocpp20Adapter?: OCPP20AuthAdapter
-  }> {
+  static createAdapter (chargingStation: ChargingStation): OCPPAuthAdapter {
     const ocppVersion = chargingStation.stationInfo?.ocppVersion
 
     if (!ocppVersion) {
@@ -49,17 +51,11 @@ export class AuthComponentFactory {
     }
 
     switch (ocppVersion) {
-      case OCPPVersion.VERSION_16: {
-        // Use static import - circular dependency is acceptable here
-        const { OCPP16AuthAdapter } = await import('../adapters/OCPP16AuthAdapter.js')
-        return { ocpp16Adapter: new OCPP16AuthAdapter(chargingStation) }
-      }
+      case OCPPVersion.VERSION_16:
+        return new OCPP16AuthAdapter(chargingStation)
       case OCPPVersion.VERSION_20:
-      case OCPPVersion.VERSION_201: {
-        // Use static import - circular dependency is acceptable here
-        const { OCPP20AuthAdapter } = await import('../adapters/OCPP20AuthAdapter.js')
-        return { ocpp20Adapter: new OCPP20AuthAdapter(chargingStation) }
-      }
+      case OCPPVersion.VERSION_201:
+        return new OCPP20AuthAdapter(chargingStation)
       default:
         throw new OCPPError(
           ErrorType.INTERNAL_ERROR,
@@ -75,58 +71,40 @@ export class AuthComponentFactory {
    */
   static createAuthCache (config: AuthConfiguration): AuthCache {
     return new InMemoryAuthCache({
-      defaultTtl: config.authorizationCacheLifetime ?? 3600,
-      maxEntries: config.maxCacheEntries ?? 1000,
+      defaultTtl: config.authorizationCacheLifetime ?? Constants.DEFAULT_AUTH_CACHE_TTL_SECONDS,
+      maxEntries: config.maxCacheEntries ?? Constants.DEFAULT_AUTH_CACHE_MAX_ENTRIES,
     })
   }
 
   /**
    * Create certificate authentication strategy
    * @param chargingStation - Charging station instance for certificate validation
-   * @param adapters - Container holding OCPP version-specific adapters
-   * @param adapters.ocpp16Adapter - Optional OCPP 1.6 protocol adapter
-   * @param adapters.ocpp20Adapter - Optional OCPP 2.0.x protocol adapter
+   * @param adapter - OCPP version-specific adapter
    * @param config - Authentication configuration with certificate settings
    * @returns Initialized certificate-based authentication strategy
    */
-  static async createCertificateStrategy (
+  static createCertificateStrategy (
     chargingStation: ChargingStation,
-    adapters: { ocpp16Adapter?: OCPP16AuthAdapter; ocpp20Adapter?: OCPP20AuthAdapter },
+    adapter: OCPPAuthAdapter,
     config: AuthConfiguration
-  ): Promise<AuthStrategy> {
-    // Use static import - circular dependency is acceptable here
-    const { CertificateAuthStrategy } = await import('../strategies/CertificateAuthStrategy.js')
-    const adapterMap = new Map<OCPPVersion, OCPP16AuthAdapter | OCPP20AuthAdapter>()
-    if (adapters.ocpp16Adapter) {
-      adapterMap.set(OCPPVersion.VERSION_16, adapters.ocpp16Adapter)
-    }
-    if (adapters.ocpp20Adapter) {
-      adapterMap.set(OCPPVersion.VERSION_20, adapters.ocpp20Adapter)
-      adapterMap.set(OCPPVersion.VERSION_201, adapters.ocpp20Adapter)
-    }
-    const strategy = new CertificateAuthStrategy(chargingStation, adapterMap)
+  ): AuthStrategy {
+    const strategy = new CertificateAuthStrategy(chargingStation, adapter)
     strategy.initialize(config)
     return strategy
   }
 
   /**
-   * Create local auth list manager (delegated to service implementation)
-   *
-   * TODO: Implement concrete LocalAuthListManager for OCPP 1.6 §3.5 and OCPP 2.0.1 §C13/C14
-   * compliance. Until implemented, LocalAuthStrategy operates with cache and offline
-   * fallback only. The OCPP 1.6 §3.5.3 guard in RemoteAuthStrategy (skip caching for
-   * local-list identifiers) is inactive without a manager.
-   * @param chargingStation - Charging station instance (unused, reserved for future use)
-   * @param config - Authentication configuration (unused, reserved for future use)
-   * @returns Always undefined as manager creation is not yet implemented
+   * Create local auth list manager
+   * @param config - Authentication configuration controlling local auth list behavior
+   * @returns In-memory local auth list manager if enabled, undefined otherwise
    */
-  static createLocalAuthListManager (
-    chargingStation: ChargingStation,
-    config: AuthConfiguration
-  ): undefined {
-    // Manager creation is delegated to OCPPAuthServiceImpl
-    // This method exists for API completeness
-    return undefined
+  static createLocalAuthListManager (config: AuthConfiguration): LocalAuthListManager | undefined {
+    if (!config.localAuthListEnabled) {
+      return undefined
+    }
+
+    const maxEntries = config.maxLocalAuthListEntries
+    return new InMemoryLocalAuthListManager(maxEntries)
   }
 
   /**
@@ -136,11 +114,11 @@ export class AuthComponentFactory {
    * @param config - Authentication configuration controlling local auth behavior
    * @returns Local strategy instance or undefined if local auth disabled
    */
-  static async createLocalStrategy (
+  static createLocalStrategy (
     manager: LocalAuthListManager | undefined,
     cache: AuthCache | undefined,
     config: AuthConfiguration
-  ): Promise<AuthStrategy | undefined> {
+  ): AuthStrategy | undefined {
     if (
       !config.localAuthListEnabled &&
       !config.authorizationCacheEnabled &&
@@ -149,8 +127,6 @@ export class AuthComponentFactory {
       return undefined
     }
 
-    // Use static import - circular dependency is acceptable here
-    const { LocalAuthStrategy } = await import('../strategies/LocalAuthStrategy.js')
     const strategy = new LocalAuthStrategy(manager, cache)
     strategy.initialize(config)
     return strategy
@@ -158,35 +134,23 @@ export class AuthComponentFactory {
 
   /**
    * Create remote authentication strategy
-   * @param adapters - Container holding OCPP version-specific adapters
-   * @param adapters.ocpp16Adapter - Optional OCPP 1.6 protocol adapter
-   * @param adapters.ocpp20Adapter - Optional OCPP 2.0.x protocol adapter
+   * @param adapter - OCPP version-specific adapter
    * @param cache - Authorization cache for storing remote auth results
    * @param config - Authentication configuration controlling remote auth behavior
-   * @param localAuthListManager - Optional local auth list manager for R17 cache exclusion
+   * @param localAuthListManager - Optional local auth list manager for C13.FR.01 cache exclusion
    * @returns Remote strategy instance or undefined if remote auth disabled
    */
-  static async createRemoteStrategy (
-    adapters: { ocpp16Adapter?: OCPP16AuthAdapter; ocpp20Adapter?: OCPP20AuthAdapter },
+  static createRemoteStrategy (
+    adapter: OCPPAuthAdapter,
     cache: AuthCache | undefined,
     config: AuthConfiguration,
     localAuthListManager?: LocalAuthListManager
-  ): Promise<AuthStrategy | undefined> {
+  ): AuthStrategy | undefined {
     if (!config.remoteAuthorization) {
       return undefined
     }
 
-    // Use static import - circular dependency is acceptable here
-    const { RemoteAuthStrategy } = await import('../strategies/RemoteAuthStrategy.js')
-    const adapterMap = new Map<OCPPVersion, OCPP16AuthAdapter | OCPP20AuthAdapter>()
-    if (adapters.ocpp16Adapter) {
-      adapterMap.set(OCPPVersion.VERSION_16, adapters.ocpp16Adapter)
-    }
-    if (adapters.ocpp20Adapter) {
-      adapterMap.set(OCPPVersion.VERSION_20, adapters.ocpp20Adapter)
-      adapterMap.set(OCPPVersion.VERSION_201, adapters.ocpp20Adapter)
-    }
-    const strategy = new RemoteAuthStrategy(adapterMap, cache, localAuthListManager)
+    const strategy = new RemoteAuthStrategy(adapter, cache, localAuthListManager)
     strategy.initialize(config)
     return strategy
   }
@@ -194,37 +158,35 @@ export class AuthComponentFactory {
   /**
    * Create all authentication strategies based on configuration
    * @param chargingStation - Charging station instance for strategy initialization
-   * @param adapters - Container holding OCPP version-specific adapters
-   * @param adapters.ocpp16Adapter - Optional OCPP 1.6 protocol adapter
-   * @param adapters.ocpp20Adapter - Optional OCPP 2.0.x protocol adapter
+   * @param adapter - OCPP version-specific adapter
    * @param manager - Local auth list manager for local strategy
    * @param cache - Authorization cache shared across strategies
    * @param config - Authentication configuration controlling strategy creation
    * @returns Array of initialized strategies sorted by priority (lowest first)
    */
-  static async createStrategies (
+  static createStrategies (
     chargingStation: ChargingStation,
-    adapters: { ocpp16Adapter?: OCPP16AuthAdapter; ocpp20Adapter?: OCPP20AuthAdapter },
+    adapter: OCPPAuthAdapter,
     manager: LocalAuthListManager | undefined,
     cache: AuthCache | undefined,
     config: AuthConfiguration
-  ): Promise<AuthStrategy[]> {
+  ): AuthStrategy[] {
     const strategies: AuthStrategy[] = []
 
     // Add local strategy if enabled
-    const localStrategy = await this.createLocalStrategy(manager, cache, config)
+    const localStrategy = this.createLocalStrategy(manager, cache, config)
     if (localStrategy) {
       strategies.push(localStrategy)
     }
 
     // Add remote strategy if enabled
-    const remoteStrategy = await this.createRemoteStrategy(adapters, cache, config, manager)
+    const remoteStrategy = this.createRemoteStrategy(adapter, cache, config, manager)
     if (remoteStrategy) {
       strategies.push(remoteStrategy)
     }
 
     // Always add certificate strategy
-    const certStrategy = await this.createCertificateStrategy(chargingStation, adapters, config)
+    const certStrategy = this.createCertificateStrategy(chargingStation, adapter, config)
     strategies.push(certStrategy)
 
     // Sort by priority

@@ -4,23 +4,30 @@
  * Factory functions to create mock ChargingStation instances with isolated dependencies.
  */
 
-import type { ChargingStation } from '../../../src/charging-station/ChargingStation.js'
+import type { ChargingStation } from '../../../src/charging-station/index.js'
 import type {
   ChargingStationInfo,
   ChargingStationOcppConfiguration,
   ChargingStationTemplate,
+  ConnectorEntry,
   ConnectorStatus,
+  EvseEntry,
   EvseStatus,
   Reservation,
+  ReservationKey,
   StopTransactionReason,
 } from '../../../src/types/index.js'
 
+import { getConfigurationKey } from '../../../src/charging-station/index.js'
 import {
   AvailabilityType,
   ConnectorStatusEnum,
+  CurrentType,
   OCPPVersion,
   RegistrationStatusEnumType,
+  StandardParametersKey,
 } from '../../../src/types/index.js'
+import { convertToBoolean } from '../../../src/utils/index.js'
 import {
   TEST_CHARGING_STATION_BASE_NAME,
   TEST_CHARGING_STATION_HASH_ID,
@@ -217,28 +224,14 @@ export function cleanupChargingStation (station: ChargingStation): void {
   }
 
   // Clear connector transaction state and timers
-  for (const connectorStatus of station.connectors.values()) {
-    if (connectorStatus.transactionSetInterval != null) {
-      clearInterval(connectorStatus.transactionSetInterval)
-      connectorStatus.transactionSetInterval = undefined
+  for (const { connectorStatus } of station.iterateConnectors()) {
+    if (connectorStatus.transactionUpdatedMeterValuesSetInterval != null) {
+      clearInterval(connectorStatus.transactionUpdatedMeterValuesSetInterval)
+      connectorStatus.transactionUpdatedMeterValuesSetInterval = undefined
     }
-    if (connectorStatus.transactionTxUpdatedSetInterval != null) {
-      clearInterval(connectorStatus.transactionTxUpdatedSetInterval)
-      connectorStatus.transactionTxUpdatedSetInterval = undefined
-    }
-  }
-
-  // Clear EVSE connector transaction state and timers
-  for (const evseStatus of station.evses.values()) {
-    for (const connectorStatus of evseStatus.connectors.values()) {
-      if (connectorStatus.transactionSetInterval != null) {
-        clearInterval(connectorStatus.transactionSetInterval)
-        connectorStatus.transactionSetInterval = undefined
-      }
-      if (connectorStatus.transactionTxUpdatedSetInterval != null) {
-        clearInterval(connectorStatus.transactionTxUpdatedSetInterval)
-        connectorStatus.transactionTxUpdatedSetInterval = undefined
-      }
+    if (connectorStatus.transactionEndedMeterValuesSetInterval != null) {
+      clearInterval(connectorStatus.transactionEndedMeterValuesSetInterval)
+      connectorStatus.transactionEndedMeterValuesSetInterval = undefined
     }
   }
 
@@ -254,7 +247,7 @@ export function cleanupChargingStation (station: ChargingStation): void {
  * Create a connector status object with default values
  *
  * This is the canonical factory for creating ConnectorStatus objects in tests.
- * @param _connectorId - Connector ID (unused, kept for API consistency)
+ * @param _connectorId - Connector ID (unused; factory creates default connector status)
  * @param options - Optional overrides for default values
  * @returns ConnectorStatus with default or customized values
  * @example
@@ -285,7 +278,7 @@ export function createConnectorStatus (
     transactionRemoteStarted: false,
     transactionStart: undefined,
     transactionStarted: false,
-  } as unknown as ConnectorStatus
+  }
 }
 
 /**
@@ -303,7 +296,7 @@ export function createConnectorStatus (
  * @example
  * ```typescript
  * const { station, mocks } = createMockChargingStation({ connectorsCount: 2 })
- * expect(station.connectors.size).toBe(3) // 0 + 2 connectors
+ * station.getNumberOfConnectors() // 2 (excludes connector 0)
  * station.wsConnection = mocks.webSocket
  * mocks.webSocket.simulateMessage('["3","uuid",{}]')
  * ```
@@ -466,37 +459,23 @@ export function createMockChargingStation (
     getConnectionTimeout (): number {
       return connectionTimeout
     },
+    getConnectorIdByEvseId (evseId: number): number | undefined {
+      return this.iterateConnectors().find(({ evseId: id }) => id === evseId)?.connectorId
+    },
     getConnectorIdByTransactionId (transactionId: number | string | undefined): number | undefined {
       if (transactionId == null) {
         return undefined
-      } else if (useEvses) {
-        for (const evseStatus of evses.values()) {
-          for (const [connectorId, connectorStatus] of evseStatus.connectors) {
-            if (connectorStatus.transactionId === transactionId) {
-              return connectorId
-            }
-          }
-        }
-      } else {
-        for (const connectorId of connectors.keys()) {
-          if (this.getConnectorStatus(connectorId)?.transactionId === transactionId) {
-            return connectorId
-          }
-        }
       }
-      return undefined
+      return this.iterateConnectors().find(
+        ({ connectorStatus }) => connectorStatus.transactionId === transactionId
+      )?.connectorId
     },
-    // Methods
+    getConnectorMaximumAvailablePower (_connectorId: number): number {
+      return stationInfoOverrides?.maximumPower ?? 22000
+    },
     getConnectorStatus (connectorId: number): ConnectorStatus | undefined {
-      if (useEvses) {
-        for (const evseStatus of evses.values()) {
-          if (evseStatus.connectors.has(connectorId)) {
-            return evseStatus.connectors.get(connectorId)
-          }
-        }
-        return undefined
-      }
-      return connectors.get(connectorId)
+      return this.iterateConnectors().find(({ connectorId: id }) => id === connectorId)
+        ?.connectorStatus
     },
     getEnergyActiveImportRegisterByConnectorId (connectorId: number, rounded = false): number {
       const connectorStatus = this.getConnectorStatus(connectorId)
@@ -517,29 +496,15 @@ export function createMockChargingStation (
       return this.getEnergyActiveImportRegisterByConnectorId(connectorId, rounded)
     },
     getEvseIdByConnectorId (connectorId: number): number | undefined {
-      if (!useEvses) {
-        return undefined
-      }
-      for (const [evseId, evseStatus] of evses) {
-        if (evseStatus.connectors.has(connectorId)) {
-          return evseId
-        }
-      }
-      return undefined
+      return this.iterateConnectors().find(({ connectorId: id }) => id === connectorId)?.evseId
     },
     getEvseIdByTransactionId (transactionId: number | string | undefined): number | undefined {
       if (transactionId == null) {
         return undefined
-      } else if (useEvses) {
-        for (const [evseId, evseStatus] of evses) {
-          for (const connectorStatus of evseStatus.connectors.values()) {
-            if (connectorStatus.transactionId === transactionId) {
-              return evseId
-            }
-          }
-        }
       }
-      return undefined
+      return this.iterateConnectors().find(
+        ({ connectorStatus }) => connectorStatus.transactionId === transactionId
+      )?.evseId
     },
     getEvseStatus (evseId: number): EvseStatus | undefined {
       return evses.get(evseId)
@@ -548,97 +513,50 @@ export function createMockChargingStation (
       return heartbeatInterval * 1000 // Return in ms
     },
     getLocalAuthListEnabled (): boolean {
-      return false // Default to false in mock
+      const key = getConfigurationKey(
+        this as unknown as ChargingStation,
+        StandardParametersKey.LocalAuthListEnabled
+      )
+      return key?.value != null ? convertToBoolean(key.value) : false
     },
     getNumberOfConnectors (): number {
-      if (useEvses) {
-        let numberOfConnectors = 0
-        for (const [evseId, evseStatus] of evses) {
-          if (evseId > 0) {
-            numberOfConnectors += evseStatus.connectors.size
-          }
-        }
-        return numberOfConnectors
-      }
-      return connectors.has(0) ? connectors.size - 1 : connectors.size
+      return this.iterateConnectors(true).reduce(count => count + 1, 0)
     },
     getNumberOfEvses (): number {
       return evses.has(0) ? evses.size - 1 : evses.size
     },
-    getNumberOfRunningTransactions (): number {
-      let numberOfRunningTransactions = 0
-      if (useEvses) {
-        for (const [evseId, evseStatus] of evses) {
-          if (evseId === 0) {
-            continue
-          }
-          for (const connectorStatus of evseStatus.connectors.values()) {
-            if (connectorStatus.transactionStarted === true) {
-              ++numberOfRunningTransactions
-            }
-          }
-        }
-      } else {
-        for (const connectorId of connectors.keys()) {
-          if (
-            connectorId > 0 &&
-            this.getConnectorStatus(connectorId)?.transactionStarted === true
-          ) {
-            ++numberOfRunningTransactions
-          }
-        }
-      }
-      return numberOfRunningTransactions
+    getNumberOfPhases (): number {
+      return stationInfoOverrides?.numberOfPhases ?? 3
     },
-    getReservationBy (filterKey: string, value: unknown): Record<string, unknown> | undefined {
-      if (useEvses) {
-        for (const evseStatus of evses.values()) {
-          for (const connectorStatus of evseStatus.connectors.values()) {
-            if (connectorStatus.reservation?.[filterKey] === value) {
-              return connectorStatus.reservation
-            }
-          }
-        }
-      } else {
-        for (const connectorStatus of connectors.values()) {
-          if (connectorStatus.reservation?.[filterKey] === value) {
-            return connectorStatus.reservation
-          }
-        }
-      }
-      return undefined
+    getNumberOfRunningTransactions (): number {
+      return this.iterateConnectors(true).reduce(
+        (count, { connectorStatus }) =>
+          connectorStatus.transactionStarted === true ? count + 1 : count,
+        0
+      )
+    },
+    getReservationBy (filterKey: ReservationKey, value: number | string): Reservation | undefined {
+      return this.iterateConnectors().find(
+        ({ connectorStatus }) => connectorStatus.reservation?.[filterKey] === value
+      )?.connectorStatus.reservation
     },
     getTransactionIdTag (transactionId: number): string | undefined {
-      if (useEvses) {
-        for (const evseStatus of evses.values()) {
-          for (const connectorStatus of evseStatus.connectors.values()) {
-            if (connectorStatus.transactionId === transactionId) {
-              return connectorStatus.transactionIdTag
-            }
-          }
-        }
-      } else {
-        for (const connectorId of connectors.keys()) {
-          if (this.getConnectorStatus(connectorId)?.transactionId === transactionId) {
-            return this.getConnectorStatus(connectorId)?.transactionIdTag
-          }
-        }
-      }
-      return undefined
+      return this.iterateConnectors().find(
+        ({ connectorStatus }) => connectorStatus.transactionId === transactionId
+      )?.connectorStatus.transactionIdTag
+    },
+    getVoltageOut (): number {
+      return stationInfoOverrides?.voltageOut ?? 230
     },
     getWebSocketPingInterval (): number {
       return websocketPingInterval
     },
     hasConnector (connectorId: number): boolean {
-      if (useEvses) {
-        for (const evseStatus of evses.values()) {
-          if (evseStatus.connectors.has(connectorId)) {
-            return true
-          }
-        }
-        return false
-      }
-      return connectors.has(connectorId)
+      return this.iterateConnectors().some(({ connectorId: id }) => id === connectorId)
+    },
+
+    hasEvse (evseId: number): boolean {
+      return evses.has(evseId)
     },
 
     // Getters
@@ -691,7 +609,45 @@ export function createMockChargingStation (
       return this.wsConnection?.readyState === WebSocketReadyState.OPEN
     },
 
+    * iterateConnectors (skipZero = false): Generator<ConnectorEntry> {
+      if (useEvses) {
+        for (const [evseId, evseStatus] of evses) {
+          if (skipZero && evseId === 0) continue
+          for (const [connectorId, connectorStatus] of evseStatus.connectors) {
+            if (skipZero && connectorId === 0) continue
+            yield { connectorId, connectorStatus, evseId }
+          }
+        }
+      } else {
+        for (const [connectorId, connectorStatus] of connectors) {
+          if (skipZero && connectorId === 0) continue
+          yield { connectorId, connectorStatus, evseId: undefined }
+        }
+      }
+    },
+
+    * iterateEvses (skipZero = false): Generator<EvseEntry> {
+      for (const [evseId, evseStatus] of evses) {
+        if (skipZero && evseId === 0) continue
+        yield { evseId, evseStatus }
+      }
+    },
+
     listenerCount: () => 0,
+
+    lockConnector (connectorId: number): void {
+      if (connectorId === 0) {
+        return
+      }
+      if (!this.hasConnector(connectorId)) {
+        return
+      }
+      const connectorStatus = this.getConnectorStatus(connectorId)
+      if (connectorStatus == null) {
+        return
+      }
+      connectorStatus.locked = true
+    },
 
     logPrefix (): string {
       return `${this.stationInfo.chargingStationId} |`
@@ -769,11 +725,6 @@ export function createMockChargingStation (
       this.startHeartbeat()
     },
 
-    restartMeterValues (connectorId: number, interval: number): void {
-      this.stopMeterValues(connectorId)
-      this.startMeterValues(connectorId, interval)
-    },
-
     restartWebSocketPing (): void {
       /* empty */
     },
@@ -794,29 +745,6 @@ export function createMockChargingStation (
     },
     starting,
 
-    startMeterValues (connectorId: number, interval: number): void {
-      const connector = this.getConnectorStatus(connectorId)
-      if (connector != null) {
-        connector.transactionSetInterval = setInterval(() => {
-          /* empty */
-        }, interval)
-      }
-    },
-
-    startTxUpdatedInterval (connectorId: number, interval: number): void {
-      if (
-        this.stationInfo.ocppVersion === OCPPVersion.VERSION_20 ||
-        this.stationInfo.ocppVersion === OCPPVersion.VERSION_201
-      ) {
-        const connector = this.getConnectorStatus(connectorId)
-        if (connector != null) {
-          connector.transactionTxUpdatedSetInterval = setInterval(() => {
-            /* empty */
-          }, interval)
-        }
-      }
-    },
-
     startWebSocketPing (): void {
       /* empty */
     },
@@ -824,13 +752,16 @@ export function createMockChargingStation (
       autoStart,
       baseName,
       chargingStationId: `${baseName}-${index.toString().padStart(5, '0')}`,
+      currentOutType: CurrentType.AC,
       hashId: TEST_CHARGING_STATION_HASH_ID,
       maximumAmperage: 32,
       maximumPower: 22000,
+      numberOfPhases: 3,
       ocppVersion: stationInfoOverrides?.ocppVersion ?? ocppVersion,
       remoteAuthorization: true,
       templateIndex: index,
       templateName: templateFile,
+      voltageOut: 230,
       ...stationInfoOverrides,
     },
 
@@ -852,23 +783,24 @@ export function createMockChargingStation (
         delete this.heartbeatSetInterval
       }
     },
-    stopMeterValues (connectorId: number): void {
-      const connector = this.getConnectorStatus(connectorId)
-      if (connector?.transactionSetInterval != null) {
-        clearInterval(connector.transactionSetInterval)
-        delete connector.transactionSetInterval
-      }
-    },
     stopping: false,
 
-    stopTxUpdatedInterval (connectorId: number): void {
-      const connector = this.getConnectorStatus(connectorId)
-      if (connector?.transactionTxUpdatedSetInterval != null) {
-        clearInterval(connector.transactionTxUpdatedSetInterval)
-        delete connector.transactionTxUpdatedSetInterval
-      }
-    },
     templateFile,
+
+    unlockConnector (connectorId: number): void {
+      if (connectorId === 0) {
+        return
+      }
+      if (!this.hasConnector(connectorId)) {
+        return
+      }
+      const connectorStatus = this.getConnectorStatus(connectorId)
+      if (connectorStatus == null) {
+        return
+      }
+      connectorStatus.locked = false
+    },
+
     wsConnection: null as MockWebSocket | null,
     wsConnectionRetryCount: 0,
   }
@@ -933,16 +865,13 @@ export function resetChargingStationState (station: ChargingStation): void {
   }
 
   // Reset connector statuses
-  for (const [connectorId, connectorStatus] of station.connectors) {
+  for (const { connectorId, connectorStatus } of station.iterateConnectors()) {
     resetConnectorStatus(connectorStatus, connectorId === 0)
   }
 
-  // Reset EVSE connector statuses
-  for (const evseStatus of station.evses.values()) {
+  // Reset EVSE availability
+  for (const { evseStatus } of station.iterateEvses()) {
     evseStatus.availability = AvailabilityType.Operative
-    for (const connectorStatus of evseStatus.connectors.values()) {
-      resetConnectorStatus(connectorStatus, false)
-    }
   }
 
   // Clear requests
@@ -992,9 +921,14 @@ function resetConnectorStatus (status: ConnectorStatus, isConnectorZero: boolean
   status.energyActiveImportRegisterValue = 0
   status.transactionEnergyActiveImportRegisterValue = 0
 
-  // Clear transaction interval
-  if (status.transactionSetInterval != null) {
-    clearInterval(status.transactionSetInterval)
-    status.transactionSetInterval = undefined
+  if (status.transactionUpdatedMeterValuesSetInterval != null) {
+    clearInterval(status.transactionUpdatedMeterValuesSetInterval)
+    status.transactionUpdatedMeterValuesSetInterval = undefined
+  }
+
+  status.transactionEndedMeterValues = undefined
+  if (status.transactionEndedMeterValuesSetInterval != null) {
+    clearInterval(status.transactionEndedMeterValuesSetInterval)
+    status.transactionEndedMeterValuesSetInterval = undefined
   }
 }

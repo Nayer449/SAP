@@ -21,7 +21,7 @@ import {
 import { Constants } from '../../../../src/utils/index.js'
 import { standardCleanup } from '../../../helpers/TestLifecycleHelpers.js'
 import { TEST_CHARGING_STATION_BASE_NAME } from '../../ChargingStationTestConstants.js'
-import { createMockChargingStation } from '../../ChargingStationTestUtils.js'
+import { createMockChargingStation } from '../../helpers/StationHelpers.js'
 
 await describe('A04 - SecurityEventNotification', async () => {
   let station: ChargingStation
@@ -33,12 +33,11 @@ await describe('A04 - SecurityEventNotification', async () => {
       baseName: TEST_CHARGING_STATION_BASE_NAME,
       connectorsCount: 1,
       evseConfiguration: { evsesCount: 1 },
-      heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
       stationInfo: {
         ocppStrictCompliance: false,
         ocppVersion: OCPPVersion.VERSION_201,
       },
-      websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+      websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
     })
     station = newStation
 
@@ -58,7 +57,10 @@ await describe('A04 - SecurityEventNotification', async () => {
     const testTimestamp = new Date('2024-03-15T10:30:00.000Z')
     const testType = 'FirmwareUpdated'
 
-    await service.requestSecurityEventNotification(station, testType, testTimestamp)
+    await service.requestHandler(station, OCPP20RequestCommand.SECURITY_EVENT_NOTIFICATION, {
+      timestamp: testTimestamp,
+      type: testType,
+    })
 
     assert.strictEqual(sendMessageMock.mock.calls.length, 1)
 
@@ -78,7 +80,11 @@ await describe('A04 - SecurityEventNotification', async () => {
     const testType = 'TamperDetectionActivated'
     const testTechInfo = 'Enclosure opened at connector 1'
 
-    await service.requestSecurityEventNotification(station, testType, testTimestamp, testTechInfo)
+    await service.requestHandler(station, OCPP20RequestCommand.SECURITY_EVENT_NOTIFICATION, {
+      techInfo: testTechInfo,
+      timestamp: testTimestamp,
+      type: testType,
+    })
 
     assert.strictEqual(sendMessageMock.mock.calls.length, 1)
 
@@ -91,11 +97,13 @@ await describe('A04 - SecurityEventNotification', async () => {
 
   // FR: A04.FR.03
   await it('should return empty response from CSMS', async () => {
-    const response = await service.requestSecurityEventNotification(
-      station,
-      'SettingSystemTime',
-      new Date('2024-03-15T12:00:00.000Z')
-    )
+    const response = await service.requestHandler<
+      OCPP20SecurityEventNotificationRequest,
+      OCPP20SecurityEventNotificationResponse
+    >(station, OCPP20RequestCommand.SECURITY_EVENT_NOTIFICATION, {
+      timestamp: new Date('2024-03-15T12:00:00.000Z'),
+      type: 'SettingSystemTime',
+    })
 
     assert.notStrictEqual(response, undefined)
     assert.strictEqual(typeof response, 'object')

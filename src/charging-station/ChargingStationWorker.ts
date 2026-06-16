@@ -6,7 +6,7 @@ import { ThreadWorker } from 'poolifier'
 import type { ChargingStationInfo, ChargingStationWorkerData } from '../types/index.js'
 
 import { BaseError } from '../exception/index.js'
-import { Configuration } from '../utils/index.js'
+import { Configuration, getErrorMessage } from '../utils/index.js'
 import { type WorkerDataError, type WorkerMessage, WorkerMessageEvents } from '../worker/index.js'
 import { ChargingStation } from './ChargingStation.js'
 
@@ -64,9 +64,9 @@ if (Configuration.workerPoolInUse()) {
               parentPort?.postMessage({
                 data: {
                   event,
-                  message: (error as Error).message,
-                  name: (error as Error).name,
-                  stack: (error as Error).stack,
+                  message: getErrorMessage(error),
+                  name: error instanceof Error ? error.name : 'UnknownError',
+                  stack: error instanceof Error ? error.stack : undefined,
                 },
                 event: WorkerMessageEvents.workerElementError,
                 uuid,

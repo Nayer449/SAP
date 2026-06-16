@@ -9,7 +9,7 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 
-import type { MockChargingStation } from '../../ChargingStationTestUtils.js'
+import type { MockChargingStation } from '../../helpers/StationHelpers.js'
 
 import { OCPP16ResponseService } from '../../../../src/charging-station/ocpp/1.6/OCPP16ResponseService.js'
 import {
@@ -26,7 +26,7 @@ import {
 import { Constants } from '../../../../src/utils/index.js'
 import { standardCleanup } from '../../../helpers/TestLifecycleHelpers.js'
 import { TEST_CHARGING_STATION_BASE_NAME } from '../../ChargingStationTestConstants.js'
-import { createMockChargingStation } from '../../ChargingStationTestUtils.js'
+import { createMockChargingStation } from '../../helpers/StationHelpers.js'
 import { dispatchResponse } from './OCPP16TestUtils.js'
 
 /**
@@ -38,14 +38,13 @@ function createSimpleHandlerStation (): MockChargingStation {
   const { station } = createMockChargingStation({
     baseName: TEST_CHARGING_STATION_BASE_NAME,
     connectorsCount: 1,
-    heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
     stationInfo: {
       ocppStrictCompliance: false,
       ocppVersion: OCPPVersion.VERSION_16,
     },
-    websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+    websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
   })
-  return station as MockChargingStation
+  return station
 }
 
 await describe('OCPP16ResponseService — SimpleHandlers', async () => {

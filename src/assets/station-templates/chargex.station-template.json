@@ -1,4 +1,5 @@
 {
+  "$schemaVersion": 1,
   "idTagsFile": "idtags.json",
   "baseName": "CS-CHARGEX",
   "chargePointModel": "Aqueduct 1.0",
@@ -41,6 +42,7 @@
     "configurationKey": [
       {
         "key": "AllowOfflineTxForUnknownId",
+        "readonly": false,
         "value": "True"
       },
       {
@@ -60,14 +62,17 @@
       },
       {
         "key": "MeterValueSampleInterval",
+        "readonly": false,
         "value": "300"
       },
       {
         "key": "TransactionMessageAttempts",
+        "readonly": false,
         "value": "3"
       },
       {
         "key": "TransactionMessageRetryInterval",
+        "readonly": false,
         "value": "20"
       },
       {

@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 
-import type { ChargingStation } from '../../../../src/charging-station/ChargingStation.js'
+import type { ChargingStation } from '../../../../src/charging-station/index.js'
 import type {
   OCPP16CancelReservationRequest,
   OCPP16ReserveNowRequest,
@@ -18,9 +18,9 @@ import type {
 import {
   GenericStatus,
   OCPP16AuthorizationStatus,
+  OCPP16ReservationStatus,
   OCPP16StandardParametersKey,
 } from '../../../../src/types/index.js'
-import { OCPP16ReservationStatus } from '../../../../src/types/ocpp/1.6/Responses.js'
 import { standardCleanup } from '../../../helpers/TestLifecycleHelpers.js'
 import {
   createOCPP16IncomingRequestTestContext,
@@ -284,15 +284,15 @@ await describe('OCPP16 Integration — Reservation Flow', async () => {
       assert.strictEqual(cancelResponse.status, GenericStatus.Rejected)
 
       // Assert — original reservation still intact
-      const connector = station.getConnectorStatus(1)
-      if (connector == null) {
+      const connectorStatus = station.getConnectorStatus(1)
+      if (connectorStatus == null) {
         assert.fail('Expected connector to be defined')
       }
-      if (connector.reservation == null) {
+      if (connectorStatus.reservation == null) {
         assert.fail('Expected reservation to be defined')
       }
-      assert.strictEqual(connector.reservation.reservationId, 500)
-      assert.strictEqual(connector.reservation.idTag, 'TAG-KEEP')
+      assert.strictEqual(connectorStatus.reservation.reservationId, 500)
+      assert.strictEqual(connectorStatus.reservation.idTag, 'TAG-KEEP')
     })
   })
 })

@@ -6,7 +6,18 @@
     ":configMigration",
     "group:allNonMajor",
     "schedule:daily",
-    ":maintainLockFilesWeekly"
+    ":maintainLockFilesWeekly",
+    "security:minimumReleaseAgeNpm"
+  ],
+  "ignorePresets": [":ignoreModulesAndTests"],
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/bower_components/**",
+    "**/vendor/**",
+    "**/examples/**",
+    "**/__tests__/**",
+    "**/test/**",
+    "**/__fixtures__/**"
   ],
   "packageRules": [
     {

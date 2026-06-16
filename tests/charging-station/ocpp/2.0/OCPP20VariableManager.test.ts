@@ -7,9 +7,10 @@ import { millisecondsToSeconds } from 'date-fns'
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 
-import type { ChargingStation } from '../../../../src/charging-station/ChargingStation.js'
+import type { ChargingStation } from '../../../../src/charging-station/index.js'
 
 import {
+  buildConfigKey,
   deleteConfigurationKey,
   getConfigurationKey,
 } from '../../../../src/charging-station/ConfigurationKeyUtils.js'
@@ -30,13 +31,13 @@ import {
   OCPPVersion,
   ReasonCodeEnumType,
   SetVariableStatusEnumType,
+  StandardParametersKey,
   type VariableType,
 } from '../../../../src/types/index.js'
-import { StandardParametersKey } from '../../../../src/types/ocpp/Configuration.js'
 import { Constants } from '../../../../src/utils/index.js'
-import { standardCleanup } from '../../../../tests/helpers/TestLifecycleHelpers.js'
+import { standardCleanup } from '../../../helpers/TestLifecycleHelpers.js'
 import { TEST_CHARGING_STATION_BASE_NAME } from '../../ChargingStationTestConstants.js'
-import { createMockChargingStation } from '../../ChargingStationTestUtils.js'
+import { createMockChargingStation } from '../../helpers/StationHelpers.js'
 import {
   resetReportingValueSize,
   resetValueSizeLimits,
@@ -75,25 +76,30 @@ await describe('B05 - OCPP20VariableManager', async () => {
       baseName: TEST_CHARGING_STATION_BASE_NAME,
       connectorsCount: 3,
       evseConfiguration: { evsesCount: 3 },
-      heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
       ocppConfiguration: {
         configurationKey: [
           {
-            key: StandardParametersKey.HeartbeatInterval,
+            key: buildConfigKey(
+              OCPP20ComponentName.OCPPCommCtrlr,
+              StandardParametersKey.HeartbeatInterval
+            ),
             readonly: false,
-            value: millisecondsToSeconds(Constants.DEFAULT_HEARTBEAT_INTERVAL).toString(),
+            value: millisecondsToSeconds(Constants.DEFAULT_HEARTBEAT_INTERVAL_MS).toString(),
           },
           {
-            key: StandardParametersKey.WebSocketPingInterval,
+            key: buildConfigKey(
+              OCPP20ComponentName.ChargingStation,
+              StandardParametersKey.WebSocketPingInterval
+            ),
             readonly: false,
-            value: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL.toString(),
+            value: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS.toString(),
           },
         ],
       },
       stationInfo: {
         ocppVersion: OCPPVersion.VERSION_201,
       },
-      websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+      websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
     })
     station = newStation
   })
@@ -102,6 +108,7 @@ await describe('B05 - OCPP20VariableManager', async () => {
   afterEach(() => {
     standardCleanup()
     OCPP20VariableManager.getInstance().resetRuntimeOverrides()
+    OCPP20VariableManager.getInstance().invalidateMappingsCache()
   })
 
   await it('should return same instance when getInstance() called multiple times', () => {
@@ -141,7 +148,7 @@ await describe('B05 - OCPP20VariableManager', async () => {
       assert.strictEqual(result[0].attributeType, AttributeEnumType.Actual)
       assert.strictEqual(
         result[0].attributeValue,
-        millisecondsToSeconds(Constants.DEFAULT_HEARTBEAT_INTERVAL).toString()
+        millisecondsToSeconds(Constants.DEFAULT_HEARTBEAT_INTERVAL_MS).toString()
       )
       assert.strictEqual(result[0].component.name, OCPP20ComponentName.OCPPCommCtrlr)
       assert.strictEqual(result[0].variable.name, OCPP20OptionalVariableName.HeartbeatInterval)
@@ -151,7 +158,7 @@ await describe('B05 - OCPP20VariableManager', async () => {
       assert.strictEqual(result[1].attributeType, AttributeEnumType.Actual)
       assert.strictEqual(
         result[1].attributeValue,
-        Constants.DEFAULT_EV_CONNECTION_TIMEOUT.toString()
+        Constants.DEFAULT_EV_CONNECTION_TIMEOUT_SECONDS.toString()
       )
       assert.strictEqual(result[1].component.name, OCPP20ComponentName.TxCtrlr)
       assert.strictEqual(result[1].variable.name, OCPP20RequiredVariableName.EVConnectionTimeOut)
@@ -193,7 +200,7 @@ await describe('B05 - OCPP20VariableManager', async () => {
     })
 
     await it('should reject invalid values for AuthorizeRemoteStart (AuthCtrlr)', () => {
-      const invalidValues = ['', '1', 'TRUE', 'False', 'yes']
+      const invalidValues = ['', '1', 'yes']
       for (const val of invalidValues) {
         const res = manager.setVariables(station, [
           {
@@ -210,8 +217,8 @@ await describe('B05 - OCPP20VariableManager', async () => {
     await it('should handle invalid component gracefully', () => {
       const request: OCPP20GetVariableDataType[] = [
         {
-          component: { name: 'InvalidComponent' as unknown as OCPP20ComponentName },
-          variable: { name: 'SomeVariable' as unknown as OCPP20OptionalVariableName },
+          component: { name: 'InvalidComponent' },
+          variable: { name: 'SomeVariable' },
         },
       ]
 
@@ -351,7 +358,7 @@ await describe('B05 - OCPP20VariableManager', async () => {
       assert.strictEqual(result[0].attributeType, AttributeEnumType.Actual)
       assert.strictEqual(
         result[0].attributeValue,
-        millisecondsToSeconds(Constants.DEFAULT_HEARTBEAT_INTERVAL).toString()
+        millisecondsToSeconds(Constants.DEFAULT_HEARTBEAT_INTERVAL_MS).toString()
       )
       assert.strictEqual(result[0].component.name, OCPP20ComponentName.OCPPCommCtrlr)
       assert.strictEqual(result[0].variable.name, OCPP20OptionalVariableName.HeartbeatInterval)
@@ -361,7 +368,7 @@ await describe('B05 - OCPP20VariableManager', async () => {
       assert.strictEqual(result[1].attributeType, AttributeEnumType.Actual)
       assert.strictEqual(
         result[1].attributeValue,
-        Constants.DEFAULT_WEBSOCKET_PING_INTERVAL.toString()
+        Constants.DEFAULT_WS_PING_INTERVAL_SECONDS.toString()
       )
       assert.strictEqual(result[1].component.name, OCPP20ComponentName.ChargingStation)
       assert.strictEqual(result[1].variable.name, OCPP20OptionalVariableName.WebSocketPingInterval)
@@ -369,7 +376,10 @@ await describe('B05 - OCPP20VariableManager', async () => {
       // Third variable: MessageTimeout
       assert.strictEqual(result[2].attributeStatus, GetVariableStatusEnumType.Accepted)
       assert.strictEqual(result[2].attributeType, AttributeEnumType.Actual)
-      assert.strictEqual(result[2].attributeValue, Constants.DEFAULT_CONNECTION_TIMEOUT.toString())
+      assert.strictEqual(
+        result[2].attributeValue,
+        Constants.DEFAULT_MESSAGE_TIMEOUT_SECONDS.toString()
+      )
       assert.strictEqual(result[2].component.name, OCPP20ComponentName.OCPPCommCtrlr)
       assert.strictEqual(result[2].component.instance, 'Default')
       assert.strictEqual(result[2].variable.name, OCPP20RequiredVariableName.MessageTimeout)
@@ -464,7 +474,7 @@ await describe('B05 - OCPP20VariableManager', async () => {
     await it('should reject unknown variables', () => {
       const component: ComponentType = { name: OCPP20ComponentName.OCPPCommCtrlr }
       const variable: VariableType = {
-        name: 'UnknownVariable' as unknown as OCPP20OptionalVariableName,
+        name: 'UnknownVariable',
       }
 
       const isSupported = testable.isVariableSupported(component, variable)
@@ -481,14 +491,14 @@ await describe('B05 - OCPP20VariableManager', async () => {
     await it('should accept setting writable variables (Actual default)', () => {
       const request: OCPP20SetVariableDataType[] = [
         {
-          attributeValue: (Constants.DEFAULT_WEBSOCKET_PING_INTERVAL + 1).toString(),
+          attributeValue: (Constants.DEFAULT_WS_PING_INTERVAL_SECONDS + 1).toString(),
           component: { name: OCPP20ComponentName.ChargingStation },
           variable: { name: OCPP20OptionalVariableName.WebSocketPingInterval },
         },
         {
           attributeType: AttributeEnumType.Actual,
           attributeValue: (
-            millisecondsToSeconds(Constants.DEFAULT_HEARTBEAT_INTERVAL) + 1
+            millisecondsToSeconds(Constants.DEFAULT_HEARTBEAT_INTERVAL_MS) + 1
           ).toString(),
           component: { name: OCPP20ComponentName.OCPPCommCtrlr },
           variable: { name: OCPP20OptionalVariableName.HeartbeatInterval },
@@ -510,7 +520,7 @@ await describe('B05 - OCPP20VariableManager', async () => {
       const request: OCPP20SetVariableDataType[] = [
         {
           attributeValue: '20',
-          component: { name: 'InvalidComponent' as unknown as OCPP20ComponentName },
+          component: { name: 'InvalidComponent' },
           variable: { name: OCPP20OptionalVariableName.WebSocketPingInterval },
         },
       ]
@@ -527,7 +537,7 @@ await describe('B05 - OCPP20VariableManager', async () => {
         {
           attributeValue: '10',
           component: { name: OCPP20ComponentName.OCPPCommCtrlr },
-          variable: { name: 'UnknownVariable' as unknown as VariableType['name'] },
+          variable: { name: 'UnknownVariable' },
         },
       ]
 
@@ -593,14 +603,14 @@ await describe('B05 - OCPP20VariableManager', async () => {
     await it('should handle multiple mixed SetVariables in one call', () => {
       const request: OCPP20SetVariableDataType[] = [
         {
-          attributeValue: (Constants.DEFAULT_WEBSOCKET_PING_INTERVAL + 2).toString(),
+          attributeValue: (Constants.DEFAULT_WS_PING_INTERVAL_SECONDS + 2).toString(),
           component: { name: OCPP20ComponentName.ChargingStation },
           variable: { name: OCPP20OptionalVariableName.WebSocketPingInterval },
         },
         {
           attributeValue: '10',
           component: { name: OCPP20ComponentName.OCPPCommCtrlr },
-          variable: { name: 'InvalidVariable' as unknown as VariableType['name'] },
+          variable: { name: 'InvalidVariable' },
         },
         {
           attributeType: AttributeEnumType.Target,
@@ -664,7 +674,10 @@ await describe('B05 - OCPP20VariableManager', async () => {
         negRes.attributeStatusInfo.reasonCode,
         ReasonCodeEnumType.ValuePositiveOnly
       )
-      assert.ok(negRes.attributeStatusInfo.additionalInfo.includes('Positive integer > 0 required'))
+      assert.ok(
+        negRes.attributeStatusInfo.additionalInfo.includes('Positive integer > 0 required'),
+        'Expected validation error message for positive integer requirement'
+      )
       assert.strictEqual(nonIntRes.attributeStatus, SetVariableStatusEnumType.Rejected)
       if (nonIntRes.attributeStatusInfo == null) {
         assert.fail('Expected attributeStatusInfo to be defined')
@@ -673,7 +686,10 @@ await describe('B05 - OCPP20VariableManager', async () => {
         assert.fail('Expected additionalInfo to be defined')
       }
       assert.strictEqual(nonIntRes.attributeStatusInfo.reasonCode, ReasonCodeEnumType.InvalidValue)
-      assert.ok(nonIntRes.attributeStatusInfo.additionalInfo.includes('Positive integer'))
+      assert.ok(
+        nonIntRes.attributeStatusInfo.additionalInfo.includes('Positive integer'),
+        'Expected validation error message for positive integer type'
+      )
     })
 
     await it('should accept setting ConnectionUrl with valid ws URL', () => {
@@ -785,7 +801,7 @@ await describe('B05 - OCPP20VariableManager', async () => {
       const request: OCPP20SetVariableDataType[] = [
         {
           attributeType: AttributeEnumType.Target,
-          attributeValue: (Constants.DEFAULT_WEBSOCKET_PING_INTERVAL + 5).toString(),
+          attributeValue: (Constants.DEFAULT_WS_PING_INTERVAL_SECONDS + 5).toString(),
           component: { name: OCPP20ComponentName.ChargingStation },
           variable: { name: OCPP20OptionalVariableName.WebSocketPingInterval },
         },
@@ -806,7 +822,7 @@ await describe('B05 - OCPP20VariableManager', async () => {
       const req: OCPP20SetVariableDataType[] = [
         {
           attributeValue: (
-            millisecondsToSeconds(Constants.DEFAULT_HEARTBEAT_INTERVAL) + 10
+            millisecondsToSeconds(Constants.DEFAULT_HEARTBEAT_INTERVAL_MS) + 10
           ).toString(),
           component: { name: OCPP20ComponentName.OCPPCommCtrlr },
           variable: { name: OCPP20OptionalVariableName.HeartbeatInterval },
@@ -862,7 +878,10 @@ await describe('B05 - OCPP20VariableManager', async () => {
         negRes.attributeStatusInfo.reasonCode,
         ReasonCodeEnumType.ValuePositiveOnly
       )
-      assert.ok(negRes.attributeStatusInfo.additionalInfo.includes('Positive integer > 0 required'))
+      assert.ok(
+        negRes.attributeStatusInfo.additionalInfo.includes('Positive integer > 0 required'),
+        'Expected validation error message for positive integer requirement'
+      )
       if (nonIntRes.attributeStatusInfo == null) {
         assert.fail('Expected attributeStatusInfo to be defined')
       }
@@ -870,7 +889,10 @@ await describe('B05 - OCPP20VariableManager', async () => {
         assert.fail('Expected additionalInfo to be defined')
       }
       assert.strictEqual(nonIntRes.attributeStatusInfo.reasonCode, ReasonCodeEnumType.InvalidValue)
-      assert.ok(nonIntRes.attributeStatusInfo.additionalInfo.includes('Positive integer'))
+      assert.ok(
+        nonIntRes.attributeStatusInfo.additionalInfo.includes('Positive integer'),
+        'Expected validation error message for positive integer type'
+      )
     })
 
     await it('should accept WebSocketPingInterval zero (disable) and positive', () => {
@@ -883,7 +905,7 @@ await describe('B05 - OCPP20VariableManager', async () => {
       ])[0]
       const posRes = manager.setVariables(station, [
         {
-          attributeValue: (Constants.DEFAULT_WEBSOCKET_PING_INTERVAL + 10).toString(),
+          attributeValue: (Constants.DEFAULT_WS_PING_INTERVAL_SECONDS + 10).toString(),
           component: { name: OCPP20ComponentName.ChargingStation },
           variable: { name: OCPP20OptionalVariableName.WebSocketPingInterval },
         },
@@ -919,7 +941,10 @@ await describe('B05 - OCPP20VariableManager', async () => {
         negRes.attributeStatusInfo.reasonCode,
         ReasonCodeEnumType.ValueZeroNotAllowed
       )
-      assert.ok(negRes.attributeStatusInfo.additionalInfo.includes('Integer >= 0 required'))
+      assert.ok(
+        negRes.attributeStatusInfo.additionalInfo.includes('Integer >= 0 required'),
+        'Expected validation error message for non-negative integer requirement'
+      )
       if (nonIntRes.attributeStatusInfo == null) {
         assert.fail('Expected attributeStatusInfo to be defined')
       }
@@ -930,13 +955,16 @@ await describe('B05 - OCPP20VariableManager', async () => {
         nonIntRes.attributeStatusInfo.reasonCode,
         ReasonCodeEnumType.ValueZeroNotAllowed
       )
-      assert.ok(nonIntRes.attributeStatusInfo.additionalInfo.includes('Integer >= 0 required'))
+      assert.ok(
+        nonIntRes.attributeStatusInfo.additionalInfo.includes('Integer >= 0 required'),
+        'Expected validation error message for non-negative integer type'
+      )
     })
 
     await it('should validate EVConnectionTimeOut positive integer >0 and reject invalid', () => {
       const okRes = manager.setVariables(station, [
         {
-          attributeValue: (Constants.DEFAULT_EV_CONNECTION_TIMEOUT + 5).toString(),
+          attributeValue: (Constants.DEFAULT_EV_CONNECTION_TIMEOUT_SECONDS + 5).toString(),
           component: { name: OCPP20ComponentName.TxCtrlr },
           variable: { name: OCPP20RequiredVariableName.EVConnectionTimeOut },
         },
@@ -987,7 +1015,10 @@ await describe('B05 - OCPP20VariableManager', async () => {
         negRes.attributeStatusInfo.reasonCode,
         ReasonCodeEnumType.ValuePositiveOnly
       )
-      assert.ok(negRes.attributeStatusInfo.additionalInfo.includes('Positive integer > 0 required'))
+      assert.ok(
+        negRes.attributeStatusInfo.additionalInfo.includes('Positive integer > 0 required'),
+        'Expected validation error message for positive integer requirement'
+      )
       if (nonIntRes.attributeStatusInfo == null) {
         assert.fail('Expected attributeStatusInfo to be defined')
       }
@@ -995,13 +1026,16 @@ await describe('B05 - OCPP20VariableManager', async () => {
         assert.fail('Expected additionalInfo to be defined')
       }
       assert.strictEqual(nonIntRes.attributeStatusInfo.reasonCode, ReasonCodeEnumType.InvalidValue)
-      assert.ok(nonIntRes.attributeStatusInfo.additionalInfo.includes('Positive integer'))
+      assert.ok(
+        nonIntRes.attributeStatusInfo.additionalInfo.includes('Positive integer'),
+        'Expected validation error message for positive integer type'
+      )
     })
 
     await it('should validate MessageTimeout positive integer >0 and reject invalid', () => {
       const okRes = manager.setVariables(station, [
         {
-          attributeValue: (Constants.DEFAULT_CONNECTION_TIMEOUT + 5).toString(),
+          attributeValue: (Constants.DEFAULT_MESSAGE_TIMEOUT_SECONDS + 5).toString(),
           component: { instance: 'Default', name: OCPP20ComponentName.OCPPCommCtrlr },
           variable: { name: OCPP20RequiredVariableName.MessageTimeout },
         },
@@ -1052,7 +1086,10 @@ await describe('B05 - OCPP20VariableManager', async () => {
         negRes.attributeStatusInfo.reasonCode,
         ReasonCodeEnumType.ValuePositiveOnly
       )
-      assert.ok(negRes.attributeStatusInfo.additionalInfo.includes('Positive integer > 0 required'))
+      assert.ok(
+        negRes.attributeStatusInfo.additionalInfo.includes('Positive integer > 0 required'),
+        'Expected validation error message for positive integer requirement'
+      )
       if (nonIntRes.attributeStatusInfo == null) {
         assert.fail('Expected attributeStatusInfo to be defined')
       }
@@ -1060,13 +1097,19 @@ await describe('B05 - OCPP20VariableManager', async () => {
         assert.fail('Expected additionalInfo to be defined')
       }
       assert.strictEqual(nonIntRes.attributeStatusInfo.reasonCode, ReasonCodeEnumType.InvalidValue)
-      assert.ok(nonIntRes.attributeStatusInfo.additionalInfo.includes('Positive integer'))
+      assert.ok(
+        nonIntRes.attributeStatusInfo.additionalInfo.includes('Positive integer'),
+        'Expected validation error message for positive integer type'
+      )
     })
 
     await it('should avoid duplicate persistence operations when value unchanged', () => {
       const keyBefore = getConfigurationKey(
         station,
-        OCPP20OptionalVariableName.HeartbeatInterval as unknown as VariableType['name']
+        buildConfigKey(
+          OCPP20ComponentName.OCPPCommCtrlr,
+          OCPP20OptionalVariableName.HeartbeatInterval
+        )
       )
       assert.notStrictEqual(keyBefore, undefined)
       const originalValue = keyBefore?.value
@@ -1088,7 +1131,10 @@ await describe('B05 - OCPP20VariableManager', async () => {
       assert.strictEqual(changed.attributeStatus, SetVariableStatusEnumType.Accepted)
       const keyAfterChange = getConfigurationKey(
         station,
-        OCPP20OptionalVariableName.HeartbeatInterval as unknown as VariableType['name']
+        buildConfigKey(
+          OCPP20ComponentName.OCPPCommCtrlr,
+          OCPP20OptionalVariableName.HeartbeatInterval
+        )
       )
       assert.notStrictEqual(keyAfterChange?.value, originalValue)
       const reverted = manager.setVariables(station, [
@@ -1101,7 +1147,10 @@ await describe('B05 - OCPP20VariableManager', async () => {
       assert.strictEqual(reverted.attributeStatus, SetVariableStatusEnumType.Accepted)
       const keyAfterRevert = getConfigurationKey(
         station,
-        OCPP20OptionalVariableName.HeartbeatInterval as unknown as VariableType['name']
+        buildConfigKey(
+          OCPP20ComponentName.OCPPCommCtrlr,
+          OCPP20OptionalVariableName.HeartbeatInterval
+        )
       )
       assert.strictEqual(keyAfterRevert?.value, originalValue)
     })
@@ -1109,12 +1158,12 @@ await describe('B05 - OCPP20VariableManager', async () => {
     await it('should add missing configuration key with default during self-check', () => {
       deleteConfigurationKey(
         station,
-        OCPP20RequiredVariableName.EVConnectionTimeOut as unknown as VariableType['name'],
+        buildConfigKey(OCPP20ComponentName.TxCtrlr, OCPP20RequiredVariableName.EVConnectionTimeOut),
         { save: false }
       )
       const before = getConfigurationKey(
         station,
-        OCPP20RequiredVariableName.EVConnectionTimeOut as unknown as VariableType['name']
+        buildConfigKey(OCPP20ComponentName.TxCtrlr, OCPP20RequiredVariableName.EVConnectionTimeOut)
       )
       assert.strictEqual(before, undefined)
       const res = manager.getVariables(station, [
@@ -1125,10 +1174,13 @@ await describe('B05 - OCPP20VariableManager', async () => {
       ])[0]
       assert.strictEqual(res.attributeStatus, GetVariableStatusEnumType.Accepted)
       assert.strictEqual(res.attributeStatusInfo, undefined)
-      assert.strictEqual(res.attributeValue, Constants.DEFAULT_EV_CONNECTION_TIMEOUT.toString())
+      assert.strictEqual(
+        res.attributeValue,
+        Constants.DEFAULT_EV_CONNECTION_TIMEOUT_SECONDS.toString()
+      )
       const after = getConfigurationKey(
         station,
-        OCPP20RequiredVariableName.EVConnectionTimeOut as unknown as VariableType['name']
+        buildConfigKey(OCPP20ComponentName.TxCtrlr, OCPP20RequiredVariableName.EVConnectionTimeOut)
       )
       assert.notStrictEqual(after, undefined)
     })
@@ -1353,7 +1405,7 @@ await describe('B05 - OCPP20VariableManager', async () => {
       // remove ValueSize to simulate unset
       deleteConfigurationKey(
         station,
-        OCPP20RequiredVariableName.ValueSize as unknown as VariableType['name'],
+        buildConfigKey(OCPP20ComponentName.DeviceDataCtrlr, OCPP20OptionalVariableName.ValueSize),
         { save: false }
       )
       const okRes = manager.setVariables(station, [
@@ -1383,7 +1435,10 @@ await describe('B05 - OCPP20VariableManager', async () => {
       setValueSize(station, 40)
       deleteConfigurationKey(
         station,
-        OCPP20RequiredVariableName.ConfigurationValueSize as unknown as VariableType['name'],
+        buildConfigKey(
+          OCPP20ComponentName.DeviceDataCtrlr,
+          OCPP20OptionalVariableName.ConfigurationValueSize
+        ),
         { save: false }
       )
       const okRes = manager.setVariables(station, [
@@ -1551,7 +1606,10 @@ await describe('B05 - OCPP20VariableManager', async () => {
 
       const beforeCfg = getConfigurationKey(
         station,
-        OCPP20RequiredVariableName.FileTransferProtocols as unknown as VariableType['name']
+        buildConfigKey(
+          OCPP20ComponentName.OCPPCommCtrlr,
+          OCPP20RequiredVariableName.FileTransferProtocols
+        )
       )
       assert.strictEqual(beforeCfg?.value, 'HTTPS,FTPS,SFTP')
       const rejected = manager.setVariables(station, [
@@ -1573,7 +1631,10 @@ await describe('B05 - OCPP20VariableManager', async () => {
       assert.strictEqual(afterGet.attributeValue, 'HTTPS,FTPS,SFTP')
       const afterCfg = getConfigurationKey(
         station,
-        OCPP20RequiredVariableName.FileTransferProtocols as unknown as VariableType['name']
+        buildConfigKey(
+          OCPP20ComponentName.OCPPCommCtrlr,
+          OCPP20RequiredVariableName.FileTransferProtocols
+        )
       )
       assert.strictEqual(afterCfg?.value, beforeCfg.value)
     })
@@ -1581,7 +1642,7 @@ await describe('B05 - OCPP20VariableManager', async () => {
     await it('should reject removed TimeSource members RTC and Manual', () => {
       const res = manager.setVariables(station, [
         {
-          attributeValue: 'NTP,GPS,RTC,Manual', // RTC & Manual no longer valid
+          attributeValue: 'NTP,GPS,RTC,Manual', // RTC and Manual are invalid TimeSource values
           component: { name: OCPP20ComponentName.ClockCtrlr },
           variable: { name: OCPP20RequiredVariableName.TimeSource },
         },
@@ -1700,11 +1761,10 @@ await describe('B05 - OCPP20VariableManager', async () => {
       baseName: 'MMStation',
       connectorsCount: 3,
       evseConfiguration: { evsesCount: 3 },
-      heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
       stationInfo: {
         ocppVersion: OCPPVersion.VERSION_201,
       },
-      websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+      websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
     })
 
     await it('should return NotSupportedAttributeType for MinSet HeartbeatInterval', () => {
@@ -1736,7 +1796,10 @@ await describe('B05 - OCPP20VariableManager', async () => {
       // Ensure ReportingValueSize unset
       deleteConfigurationKey(
         station,
-        OCPP20RequiredVariableName.ReportingValueSize as unknown as VariableType['name'],
+        buildConfigKey(
+          OCPP20ComponentName.DeviceDataCtrlr,
+          OCPP20OptionalVariableName.ReportingValueSize
+        ),
         { save: false }
       )
       // Temporarily set large ValueSize to allow storing long value
@@ -1802,10 +1865,10 @@ await describe('B05 - OCPP20VariableManager', async () => {
       const overLongValue = buildWsExampleUrl(3000, 'c')
       upsertConfigurationKey(
         station,
-        OCPP20VendorVariableName.ConnectionUrl as unknown as VariableType['name'],
+        buildConfigKey(OCPP20ComponentName.ChargingStation, OCPP20VendorVariableName.ConnectionUrl),
         overLongValue
       )
-      // Set generous ValueSize (1500) and ReportingValueSize (1400) so only absolute cap applies (since both < Constants.OCPP_VALUE_ABSOLUTE_MAX_LENGTH)
+      // Set generous ValueSize (1500) and ReportingValueSize (1400) so only absolute cap applies (since both < OCPP20Constants.MAX_VARIABLE_VALUE_LENGTH)
       setValueSize(station, 1500)
       setReportingValueSize(station, 1400)
       const getRes = manager.getVariables(station, [
@@ -1861,12 +1924,18 @@ await describe('B05 - OCPP20VariableManager', async () => {
     await it('should auto-create persistent OrganizationName configuration key during self-check', () => {
       deleteConfigurationKey(
         station,
-        OCPP20RequiredVariableName.OrganizationName as unknown as VariableType['name'],
+        buildConfigKey(
+          OCPP20ComponentName.SecurityCtrlr,
+          OCPP20RequiredVariableName.OrganizationName
+        ),
         { save: false }
       )
       const before = getConfigurationKey(
         station,
-        OCPP20RequiredVariableName.OrganizationName as unknown as VariableType['name']
+        buildConfigKey(
+          OCPP20ComponentName.SecurityCtrlr,
+          OCPP20RequiredVariableName.OrganizationName
+        )
       )
       assert.strictEqual(before, undefined)
       const res = manager.getVariables(station, [
@@ -1876,13 +1945,16 @@ await describe('B05 - OCPP20VariableManager', async () => {
         },
       ])[0]
       assert.strictEqual(res.attributeStatus, GetVariableStatusEnumType.Accepted)
-      assert.strictEqual(res.attributeValue, 'Example Charging Services Ltd')
+      assert.strictEqual(res.attributeValue, 'ChangeMeOrg')
       const after = getConfigurationKey(
         station,
-        OCPP20RequiredVariableName.OrganizationName as unknown as VariableType['name']
+        buildConfigKey(
+          OCPP20ComponentName.SecurityCtrlr,
+          OCPP20RequiredVariableName.OrganizationName
+        )
       )
       assert.notStrictEqual(after, undefined)
-      assert.strictEqual(after?.value, 'Example Charging Services Ltd')
+      assert.strictEqual(after?.value, 'ChangeMeOrg')
     })
 
     await it('should accept setting OrganizationName and require reboot per OCPP 2.0.1 specification', () => {
@@ -1930,7 +2002,11 @@ await describe('B05 - OCPP20VariableManager', async () => {
       // Ensure no configuration key exists before operations
       const cfgBefore = getConfigurationKey(
         station,
-        OCPP20RequiredVariableName.MessageAttemptInterval as unknown as VariableType['name']
+        buildConfigKey(
+          OCPP20ComponentName.OCPPCommCtrlr,
+          OCPP20RequiredVariableName.MessageAttemptInterval,
+          'TransactionEvent'
+        )
       )
       assert.strictEqual(cfgBefore, undefined)
       const initialGet = manager.getVariables(station, [
@@ -2042,10 +2118,169 @@ await describe('B05 - OCPP20VariableManager', async () => {
 
       const cfgAfter = getConfigurationKey(
         station,
-        OCPP20RequiredVariableName.MessageAttemptInterval as unknown as VariableType['name']
+        buildConfigKey(
+          OCPP20ComponentName.OCPPCommCtrlr,
+          OCPP20RequiredVariableName.MessageAttemptInterval,
+          'TransactionEvent'
+        )
       )
       assert.notStrictEqual(cfgAfter, undefined)
       assert.strictEqual(cfgAfter?.value, '7')
     })
+  })
+
+  await it('should cache validatePersistentMappings and not re-run on second getVariables call', t => {
+    // Arrange
+    const manager = OCPP20VariableManager.getInstance()
+    const validateSpy = t.mock.method(manager, 'validatePersistentMappings')
+    const request: OCPP20GetVariableDataType[] = [
+      {
+        component: { name: OCPP20ComponentName.OCPPCommCtrlr },
+        variable: { name: OCPP20OptionalVariableName.HeartbeatInterval },
+      },
+    ]
+
+    // Act
+    const result1 = manager.getVariables(station, request)
+    const result2 = manager.getVariables(station, request)
+
+    // Assert
+    assert.strictEqual(result1[0].attributeStatus, GetVariableStatusEnumType.Accepted)
+    assert.strictEqual(result2[0].attributeStatus, GetVariableStatusEnumType.Accepted)
+    assert.strictEqual(result1[0].attributeValue, result2[0].attributeValue)
+    assert.strictEqual(
+      validateSpy.mock.callCount(),
+      2,
+      'validatePersistentMappings should be called twice (once per getVariables)'
+    )
+    // The second call should be a no-op (early return) because the station is already validated.
+    // Verify by invalidating and calling again — the third call should re-validate.
+    manager.invalidateMappingsCache()
+    const result3 = manager.getVariables(station, request)
+    assert.strictEqual(result3[0].attributeStatus, GetVariableStatusEnumType.Accepted)
+    assert.strictEqual(result3[0].attributeValue, result1[0].attributeValue)
+    assert.strictEqual(validateSpy.mock.callCount(), 3)
+  })
+
+  await describe('MinSet/MaxSet atomicity tests', async () => {
+    let manager: OCPP20VariableManager
+    const registryKey = `${OCPP20ComponentName.TxCtrlr as string}::${OCPP20RequiredVariableName.EVConnectionTimeOut as string}`
+    let originalSupportedAttributes: AttributeEnumType[]
+
+    beforeEach(() => {
+      manager = OCPP20VariableManager.getInstance()
+      originalSupportedAttributes = [...VARIABLE_REGISTRY[registryKey].supportedAttributes]
+      VARIABLE_REGISTRY[registryKey].supportedAttributes = [
+        AttributeEnumType.Actual,
+        AttributeEnumType.MinSet,
+        AttributeEnumType.MaxSet,
+      ]
+    })
+
+    afterEach(() => {
+      VARIABLE_REGISTRY[registryKey].supportedAttributes = originalSupportedAttributes
+    })
+
+    await it('should accept paired MinSet and MaxSet in a single request when newMin <= newMax', () => {
+      // Arrange: establish a low MaxSet override that would cause individual MinSet=20 to fail
+      const setupResult = manager.setVariables(station, [
+        {
+          attributeType: AttributeEnumType.MaxSet,
+          attributeValue: '10',
+          component: { name: OCPP20ComponentName.TxCtrlr },
+          variable: { name: OCPP20RequiredVariableName.EVConnectionTimeOut },
+        },
+      ])
+      assert.strictEqual(setupResult[0].attributeStatus, SetVariableStatusEnumType.Accepted)
+
+      // Act: send paired MinSet=20 + MaxSet=30 in a single request
+      const results = manager.setVariables(station, [
+        {
+          attributeType: AttributeEnumType.MinSet,
+          attributeValue: '20',
+          component: { name: OCPP20ComponentName.TxCtrlr },
+          variable: { name: OCPP20RequiredVariableName.EVConnectionTimeOut },
+        },
+        {
+          attributeType: AttributeEnumType.MaxSet,
+          attributeValue: '30',
+          component: { name: OCPP20ComponentName.TxCtrlr },
+          variable: { name: OCPP20RequiredVariableName.EVConnectionTimeOut },
+        },
+      ])
+
+      // Assert: both attributes accepted as a coherent pair
+      assert.strictEqual(results.length, 2)
+      assert.strictEqual(results[0].attributeStatus, SetVariableStatusEnumType.Accepted)
+      assert.strictEqual(results[0].attributeType, AttributeEnumType.MinSet)
+      assert.strictEqual(results[1].attributeStatus, SetVariableStatusEnumType.Accepted)
+      assert.strictEqual(results[1].attributeType, AttributeEnumType.MaxSet)
+    })
+  })
+
+  await it('should maintain independent invalidVariables per station', () => {
+    const manager = OCPP20VariableManager.getInstance()
+    const registryKey = `${OCPP20ComponentName.TxCtrlr as string}::${OCPP20RequiredVariableName.EVConnectionTimeOut as string}`
+    const originalDefault = VARIABLE_REGISTRY[registryKey].defaultValue
+
+    const { station: stationA } = createMockChargingStation({
+      baseName: 'StationA',
+      connectorsCount: 3,
+      evseConfiguration: { evsesCount: 3 },
+      stationInfo: {
+        hashId: 'station-a-hash',
+        ocppVersion: OCPPVersion.VERSION_201,
+      },
+      websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
+    })
+    const { station: stationB } = createMockChargingStation({
+      baseName: 'StationB',
+      connectorsCount: 3,
+      evseConfiguration: { evsesCount: 3 },
+      stationInfo: {
+        hashId: 'station-b-hash',
+        ocppVersion: OCPPVersion.VERSION_201,
+      },
+      websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
+    })
+
+    try {
+      deleteConfigurationKey(
+        stationA,
+        buildConfigKey(OCPP20ComponentName.TxCtrlr, OCPP20RequiredVariableName.EVConnectionTimeOut),
+        { save: false }
+      )
+      VARIABLE_REGISTRY[registryKey].defaultValue = undefined
+
+      manager.validatePersistentMappings(stationA)
+
+      VARIABLE_REGISTRY[registryKey].defaultValue = originalDefault
+
+      manager.validatePersistentMappings(stationB)
+
+      const resultA = manager.getVariables(stationA, [
+        {
+          component: { name: OCPP20ComponentName.TxCtrlr },
+          variable: { name: OCPP20RequiredVariableName.EVConnectionTimeOut },
+        },
+      ])[0]
+      assert.strictEqual(resultA.attributeStatus, GetVariableStatusEnumType.Rejected)
+      assert.strictEqual(resultA.attributeStatusInfo?.reasonCode, ReasonCodeEnumType.InternalError)
+
+      const resultB = manager.getVariables(stationB, [
+        {
+          component: { name: OCPP20ComponentName.TxCtrlr },
+          variable: { name: OCPP20RequiredVariableName.EVConnectionTimeOut },
+        },
+      ])[0]
+      assert.strictEqual(resultB.attributeStatus, GetVariableStatusEnumType.Accepted)
+      assert.strictEqual(
+        resultB.attributeValue,
+        Constants.DEFAULT_EV_CONNECTION_TIMEOUT_SECONDS.toString()
+      )
+    } finally {
+      VARIABLE_REGISTRY[registryKey].defaultValue = originalDefault
+      manager.invalidateMappingsCache()
+    }
   })
 })

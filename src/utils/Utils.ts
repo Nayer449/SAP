@@ -15,8 +15,10 @@ import { getRandomValues, randomBytes, randomUUID } from 'node:crypto'
 import { env } from 'node:process'
 
 import {
+  type JsonObject,
   type JsonType,
   MapStringifyFormat,
+  MessageType,
   type TimestampedData,
   type UUIDv4,
   WebSocketCloseEventStatusString,
@@ -30,17 +32,27 @@ export const logPrefix = (prefixString = ''): string => {
   return `${new Date().toLocaleString()}${prefixString}`
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const once = <T extends (...args: any[]) => any>(fn: T): T => {
+/**
+ * Formats a log prefix for direct concatenation with a module/method tag.
+ * @param logPrefixFn - Prefix-producing function. Defaults to `logPrefix` so callers without a
+ *                     module-specific prefix still emit a timestamped log line.
+ * @returns The prefix followed by a single trailing space (e.g. `"<prefix> "`). The trailing space is part of the
+ *          contract: call sites concatenate the result directly with the message body, e.g.
+ *          `` `${formatLogPrefix(fn)}${moduleName}.method: ...` ``.
+ */
+export const formatLogPrefix = (logPrefixFn: () => string = logPrefix): string => {
+  return `${logPrefixFn()} `
+}
+
+export const once = <A extends unknown[], R>(fn: (...args: A) => R): ((...args: A) => R) => {
   let hasBeenCalled = false
-  let result: ReturnType<T>
+  let result!: R
   let thrownError: Error | undefined
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return function (this: any, ...args: Parameters<T>): ReturnType<T> {
+  return (...args: A): R => {
     if (!hasBeenCalled) {
       hasBeenCalled = true
       try {
-        result = fn.apply(this, args) as ReturnType<T>
+        result = fn(...args)
       } catch (err) {
         thrownError = err as Error
       }
@@ -48,69 +60,72 @@ export const once = <T extends (...args: any[]) => any>(fn: T): T => {
     if (thrownError != null) {
       throw thrownError
     }
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
     return result
-  } as T
+  }
 }
 
 export const has = (property: PropertyKey, object: unknown): boolean => {
   if (object == null || (typeof object !== 'object' && typeof object !== 'function')) {
     return false
   }
-  return Object.hasOwn(object as Record<PropertyKey, unknown>, property)
+  return Object.hasOwn(object, property)
 }
 
-const type = (value: unknown): string => {
-  if (value === null) return 'Null'
-  if (value === undefined) return 'Undefined'
-  if (Number.isNaN(value)) return 'NaN'
-  if (Array.isArray(value)) return 'Array'
-  return Object.prototype.toString.call(value).slice(8, -1)
+const isPlainObject = (value: unknown): value is object => {
+  return Object.prototype.toString.call(value) === '[object Object]'
+}
+
+export const isJsonObject = (value: unknown): value is JsonObject => {
+  return isPlainObject(value)
+}
+
+/**
+ * Asserts that the given value is a JSON object (non-null, non-array object).
+ * @param value - Value to assert.
+ * @param error - Optional custom error or context message.
+ * @throws {Error | TypeError} The provided error, or a TypeError with the context message.
+ */
+export function assertIsJsonObject (
+  value: unknown,
+  error?: Error | string
+): asserts value is JsonObject {
+  if (!isJsonObject(value)) {
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new TypeError(
+      error != null ? `Expected a JSON object: ${error}` : 'Expected a JSON object'
+    )
+  }
 }
 
 export const isEmpty = (value: unknown): boolean => {
-  const valueType = type(value)
-  if (['BigInt', 'Boolean', 'NaN', 'Null', 'Number', 'Undefined'].includes(valueType)) {
+  if (
+    value == null ||
+    typeof value === 'bigint' ||
+    typeof value === 'boolean' ||
+    typeof value === 'number'
+  ) {
     return false
   }
-  if (!value) return true
 
-  if (valueType === 'String') {
-    return (value as string).trim().length === 0
-  }
-
-  if (valueType === 'Object') {
-    return Object.keys(value as Record<string, unknown>).length === 0
-  }
-
-  if (valueType === 'Array') {
-    return (value as unknown[]).length === 0
-  }
-
-  if (valueType === 'Map') {
-    return (value as Map<unknown, unknown>).size === 0
-  }
-
-  if (valueType === 'Set') {
-    return (value as Set<unknown>).size === 0
-  }
-
+  if (typeof value === 'string') return value.trim().length === 0
+  if (Array.isArray(value)) return value.length === 0
+  if (value instanceof Map) return value.size === 0
+  if (value instanceof Set) return value.size === 0
+  if (isPlainObject(value)) return Object.keys(value).length === 0
   return false
-}
-
-const isObject = (value: unknown): value is object => {
-  return type(value) === 'Object'
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters
 export const mergeDeepRight = <T extends object, S extends object>(target: T, source: S): T => {
   const output: Record<string, unknown> = { ...(target as Record<string, unknown>) }
 
-  if (isObject(target) && isObject(source)) {
-    Object.keys(source as Record<string, unknown>).forEach(key => {
+  if (isPlainObject(target) && isPlainObject(source)) {
+    Object.keys(source).forEach(key => {
       const sourceValue = (source as Record<string, unknown>)[key]
       const targetValue = (target as Record<string, unknown>)[key]
-      if (isObject(sourceValue) && isObject(targetValue)) {
+      if (isPlainObject(sourceValue) && isPlainObject(targetValue)) {
         output[key] = mergeDeepRight(
           targetValue as Record<string, unknown>,
           sourceValue as Record<string, unknown>
@@ -147,6 +162,33 @@ export const sleep = async (milliSeconds: number): Promise<NodeJS.Timeout> => {
       resolve(timeout)
     }, milliSeconds)
   })
+}
+
+/**
+ * Races a promise against a timeout. Resolves/rejects with the promise result
+ * if it settles before the deadline, otherwise rejects with a timeout error.
+ * The timer is always cleaned up when the promise settles first.
+ * @param promise - The promise to race
+ * @param timeoutMs - Timeout duration in milliseconds
+ * @param timeoutError - Error (or message string) to reject with on timeout
+ * @returns The resolved value of the original promise, or rejects on timeout
+ */
+export const promiseWithTimeout = <T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutError: Error | string
+): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout>
+  return Promise.race([
+    promise.finally(() => {
+      clearTimeout(timer)
+    }),
+    new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        reject(typeof timeoutError === 'string' ? new Error(timeoutError) : timeoutError)
+      }, timeoutMs)
+    }),
+  ])
 }
 
 export const formatDurationMilliSeconds = (duration: number): string => {
@@ -259,8 +301,9 @@ export const convertToBoolean = (value: unknown): boolean => {
     // Check the type
     if (typeof value === 'boolean') {
       return value
-    } else if (typeof value === 'string' && (value.toLowerCase() === 'true' || value === '1')) {
-      result = true
+    } else if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase()
+      result = normalized === 'true' || normalized === '1'
     } else if (typeof value === 'number' && value === 1) {
       result = true
     }
@@ -338,7 +381,7 @@ export const extractTimeSeriesValues = (timeSeries: CircularBuffer<TimestampedDa
 }
 
 export const clone = <T>(object: T): T => {
-  return structuredClone<T>(object)
+  return structuredClone(object)
 }
 
 type AsyncFunctionType<A extends unknown[], R> = (...args: A) => PromiseLike<R>
@@ -376,15 +419,32 @@ export const insertAt = (str: string, subStr: string, pos: number): string =>
   `${str.slice(0, pos)}${subStr}${str.slice(pos)}`
 
 /**
- * Computes the retry delay in milliseconds using an exponential backoff algorithm.
- * @param retryNumber - the number of retries that have already been attempted
- * @param delayFactor - the base delay factor in milliseconds
+ * Generalized exponential back-off: baseDelayMs × 2^min(retryNumber, maxRetries) + jitter.
+ * @param options - back-off configuration
+ * @param options.baseDelayMs - base delay in milliseconds
+ * @param options.retryNumber - current retry attempt (0-based)
+ * @param options.maxRetries - stop doubling after this many retries (default: unlimited)
+ * @param options.jitterMs - maximum fixed random jitter in milliseconds (default: 0)
+ * @param options.jitterPercent - proportional jitter as fraction of computed delay, e.g. 0.2 = 20% (default: 0)
  * @returns delay in milliseconds
  */
-export const exponentialDelay = (retryNumber = 0, delayFactor = 100): number => {
-  const delay = 2 ** retryNumber * delayFactor
-  const randomSum = delay * 0.2 * secureRandom() // 0-20% of the delay
-  return delay + randomSum
+export const computeExponentialBackOffDelay = (options: {
+  baseDelayMs: number
+  jitterMs?: number
+  jitterPercent?: number
+  maxRetries?: number
+  retryNumber: number
+}): number => {
+  const { baseDelayMs, jitterMs, jitterPercent, maxRetries, retryNumber } = options
+  const effectiveRetry = maxRetries != null ? Math.min(retryNumber, maxRetries) : retryNumber
+  const delay = baseDelayMs * 2 ** effectiveRetry
+  let jitter = 0
+  if (jitterPercent != null && jitterPercent > 0) {
+    jitter = delay * jitterPercent * secureRandom()
+  } else if (jitterMs != null && jitterMs > 0) {
+    jitter = secureRandom() * jitterMs
+  }
+  return delay + jitter
 }
 
 /**
@@ -394,7 +454,7 @@ export const exponentialDelay = (retryNumber = 0, delayFactor = 100): number => 
  * @see https://nodejs.org/api/timers.html#settimeoutcallback-delay-args
  */
 export const clampToSafeTimerValue = (delayMs: number): number => {
-  return Math.min(Math.max(0, delayMs), Constants.MAX_SETINTERVAL_DELAY)
+  return Math.min(Math.max(0, delayMs), Constants.MAX_SETINTERVAL_DELAY_MS)
 }
 
 /**
@@ -456,11 +516,11 @@ export const getWebSocketCloseEventStatusString = (code: number): string => {
       return '(For applications)'
     }
   }
-  if (
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    WebSocketCloseEventStatusString[code as keyof typeof WebSocketCloseEventStatusString] != null
-  ) {
-    return WebSocketCloseEventStatusString[code as keyof typeof WebSocketCloseEventStatusString]
+  const statusString = (
+    WebSocketCloseEventStatusString as Readonly<Record<number, string | undefined>>
+  )[code]
+  if (statusString != null) {
+    return statusString
   }
   return '(Unknown)'
 }
@@ -481,4 +541,24 @@ export const queueMicrotaskErrorThrowing = (error: Error): void => {
   queueMicrotask(() => {
     throw error
   })
+}
+
+export const truncateId = (identifier: string, maxLen = 8): string => {
+  if (identifier.length <= maxLen) {
+    return identifier
+  }
+  return `${identifier.slice(0, maxLen)}...`
+}
+
+export const getMessageTypeString = (messageType: MessageType | undefined): string => {
+  switch (messageType) {
+    case MessageType.CALL_ERROR_MESSAGE:
+      return 'error'
+    case MessageType.CALL_MESSAGE:
+      return 'request'
+    case MessageType.CALL_RESULT_MESSAGE:
+      return 'response'
+    default:
+      return 'unknown'
+  }
 }

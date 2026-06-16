@@ -1,6 +1,8 @@
 import type { EmptyObject } from '../../EmptyObject.js'
 import type { JsonObject } from '../../JsonType.js'
 
+import { type EncodingMethodEnumType, type SigningMethodEnumType } from '../Configuration.js'
+
 export enum OCPP16MeterValueContext {
   INTERRUPTION_BEGIN = 'Interruption.Begin',
   INTERRUPTION_END = 'Interruption.End',
@@ -10,6 +12,11 @@ export enum OCPP16MeterValueContext {
   TRANSACTION_BEGIN = 'Transaction.Begin',
   TRANSACTION_END = 'Transaction.End',
   TRIGGER = 'Trigger',
+}
+
+export enum OCPP16MeterValueFormat {
+  RAW = 'Raw',
+  SIGNED_DATA = 'SignedData',
 }
 
 export enum OCPP16MeterValueLocation {
@@ -77,11 +84,6 @@ export enum OCPP16MeterValueUnit {
   WATT_HOUR = 'Wh',
 }
 
-enum OCPP16MeterValueFormat {
-  RAW = 'Raw',
-  SIGNED_DATA = 'SignedData',
-}
-
 export interface OCPP16MeterValue extends JsonObject {
   sampledValue: OCPP16SampledValue[]
   timestamp: Date
@@ -103,4 +105,11 @@ export interface OCPP16SampledValue extends JsonObject {
   phase?: OCPP16MeterValuePhase
   unit?: OCPP16MeterValueUnit
   value: string
+}
+
+export interface OCPP16SignedMeterValue extends JsonObject {
+  encodingMethod: EncodingMethodEnumType | string
+  publicKey: string
+  signedMeterData: string
+  signingMethod: '' | SigningMethodEnumType
 }

@@ -27,8 +27,10 @@
 
 import { mock } from 'node:test'
 
-import type { ChargingStation } from '../../src/charging-station/ChargingStation.js'
+import type { ChargingStation } from '../../src/charging-station/index.js'
+import type { MockChargingStationOptions } from '../charging-station/helpers/StationHelpers.js'
 
+import { createMockChargingStation } from '../charging-station/helpers/StationHelpers.js'
 import { MockIdTagsCache, MockSharedLRUCache } from '../charging-station/mocks/MockCaches.js'
 
 /**
@@ -98,24 +100,24 @@ interface TimerTestContext {
  * @param connectorId - Connector to clear
  */
 export function clearConnectorTransaction (station: ChargingStation, connectorId: number): void {
-  const connector = station.getConnectorStatus(connectorId)
-  if (connector == null) {
+  const connectorStatus = station.getConnectorStatus(connectorId)
+  if (connectorStatus == null) {
     return
   }
 
-  connector.transactionStarted = false
-  connector.transactionId = undefined
-  connector.transactionIdTag = undefined
-  connector.transactionEnergyActiveImportRegisterValue = 0
-  connector.transactionRemoteStarted = false
-  connector.transactionStart = undefined
-  connector.idTagAuthorized = false
-  connector.idTagLocalAuthorized = false
+  connectorStatus.transactionStarted = false
+  connectorStatus.transactionId = undefined
+  connectorStatus.transactionIdTag = undefined
+  connectorStatus.transactionEnergyActiveImportRegisterValue = 0
+  connectorStatus.transactionRemoteStarted = false
+  connectorStatus.transactionStart = undefined
+  connectorStatus.idTagAuthorized = false
+  connectorStatus.idTagLocalAuthorized = false
 
   // Clear any transaction interval
-  if (connector.transactionSetInterval != null) {
-    clearInterval(connector.transactionSetInterval)
-    connector.transactionSetInterval = undefined
+  if (connectorStatus.transactionUpdatedMeterValuesSetInterval != null) {
+    clearInterval(connectorStatus.transactionUpdatedMeterValuesSetInterval)
+    connectorStatus.transactionUpdatedMeterValuesSetInterval = undefined
   }
 }
 
@@ -195,6 +197,23 @@ export function createLoggerMocks (
 }
 
 /**
+ * Creates a mock charging station with a spied requestHandler for verifying OCPP requests.
+ * @param opts - Additional mock station options to merge
+ * @returns Object with the station and its requestHandler spy
+ */
+export function createStationWithRequestHandler (opts?: Partial<MockChargingStationOptions>): {
+  requestHandler: ReturnType<typeof mock.fn>
+  station: ChargingStation
+} {
+  const requestHandler = mock.fn(async (..._args: unknown[]) => Promise.resolve({}))
+  const { station } = createMockChargingStation({
+    ocppRequestService: { requestHandler },
+    ...opts,
+  })
+  return { requestHandler, station }
+}
+
+/**
  * Create a timer scope for manual control over timer mocking.
  *
  * Use this when you need more control than withMockTimers provides,
@@ -238,12 +257,28 @@ export function createTimerScope (
 }
 
 /**
+ * Install no-op spies on the logger warn and debug methods.
+ * @param t - Test context from node:test.
+ * @param logger - Logger instance to spy on.
+ * @param logger.debug - Logger debug method
+ * @param logger.warn - Logger warn method
+ */
+export function mockLoggerWarnDebug (
+  t: MockContext,
+  logger: { debug: unknown; warn: unknown }
+): void {
+  t.mock.method(logger, 'warn')
+  t.mock.method(logger, 'debug')
+}
+
+/**
  * Setup a connector with an active transaction
  *
  * Reduces boilerplate when tests need a connector in transaction state.
  * @param station - ChargingStation instance
  * @param connectorId - Connector to setup
  * @param options - Transaction options
+ * @param options.pending - Whether transaction is pending (not started) (default: false)
  * @param options.transactionId - Transaction ID to set
  * @param options.idTag - ID tag for the transaction (default: TAG-{transactionId})
  * @param options.energyImport - Energy import value in Wh (default: 0)
@@ -263,22 +298,28 @@ export function setupConnectorWithTransaction (
   options: {
     energyImport?: number
     idTag?: string
+    pending?: boolean
     remoteStarted?: boolean
-    transactionId: number
+    transactionId: number | string
   }
 ): void {
-  const connector = station.getConnectorStatus(connectorId)
-  if (connector == null) {
+  const connectorStatus = station.getConnectorStatus(connectorId)
+  if (connectorStatus == null) {
     throw new Error(`Connector ${String(connectorId)} not found`)
   }
 
-  connector.transactionStarted = true
-  connector.transactionId = options.transactionId
-  connector.transactionIdTag = options.idTag ?? `TAG-${String(options.transactionId)}`
-  connector.transactionEnergyActiveImportRegisterValue = options.energyImport ?? 0
-  connector.transactionRemoteStarted = options.remoteStarted ?? false
-  connector.transactionStart = new Date()
-  connector.idTagAuthorized = true
+  if (options.pending === true) {
+    connectorStatus.transactionPending = true
+    connectorStatus.transactionStarted = false
+  } else {
+    connectorStatus.transactionStarted = true
+  }
+  connectorStatus.transactionId = options.transactionId
+  connectorStatus.transactionIdTag = options.idTag ?? `TAG-${String(options.transactionId)}`
+  connectorStatus.transactionEnergyActiveImportRegisterValue = options.energyImport ?? 0
+  connectorStatus.transactionRemoteStarted = options.remoteStarted ?? false
+  connectorStatus.transactionStart = new Date()
+  connectorStatus.idTagAuthorized = options.pending !== true
 }
 
 /**
@@ -306,6 +347,17 @@ export function standardCleanup (): void {
   MockSharedLRUCache.resetInstance()
   MockIdTagsCache.resetInstance()
 }
+
+/**
+ * Flush all pending microtasks by yielding to the event loop.
+ * setImmediate fires after all microtasks in the current event loop iteration are drained.
+ * Use this in tests that need to await async side effects triggered by synchronous calls
+ * (e.g. event emitters that fire async handlers).
+ */
+export const flushMicrotasks = (): Promise<void> =>
+  new Promise<void>(resolve => {
+    setImmediate(resolve)
+  })
 
 /**
  * Suspends execution for the specified number of milliseconds.

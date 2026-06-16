@@ -1,11 +1,14 @@
 import type { WebSocket } from 'ws'
 
 import type { WorkerData } from '../worker/index.js'
-import type { ChargingStationAutomaticTransactionGeneratorConfiguration } from './AutomaticTransactionGenerator.js'
+import type {
+  AutomaticTransactionGeneratorConfiguration,
+  Status,
+} from './AutomaticTransactionGenerator.js'
 import type { ChargingStationInfo } from './ChargingStationInfo.js'
 import type { ChargingStationOcppConfiguration } from './ChargingStationOcppConfiguration.js'
-import type { ConnectorStatus } from './ConnectorStatus.js'
-import type { EvseStatus } from './Evse.js'
+import type { ConnectorEntry } from './ConnectorStatus.js'
+import type { EvseEntry } from './Evse.js'
 import type { JsonObject } from './JsonType.js'
 import type { BootNotificationResponse } from './ocpp/Responses.js'
 import type { Statistics } from './Statistics.js'
@@ -17,11 +20,21 @@ enum ChargingStationMessageEvents {
   performanceStatistics = 'performanceStatistics',
 }
 
+export interface ATGConfiguration {
+  automaticTransactionGenerator?: AutomaticTransactionGeneratorConfiguration
+  automaticTransactionGeneratorStatuses?: ATGEntry[]
+}
+
+export interface ATGEntry {
+  connectorId: number
+  status: Status
+}
+
 export interface ChargingStationData extends WorkerData {
-  automaticTransactionGenerator?: ChargingStationAutomaticTransactionGeneratorConfiguration
+  automaticTransactionGenerator?: ATGConfiguration
   bootNotificationResponse?: BootNotificationResponse
-  connectors: ConnectorStatus[]
-  evses: EvseStatusWorkerType[]
+  connectors: ConnectorEntry[]
+  evses: EvseEntry[]
   ocppConfiguration: ChargingStationOcppConfiguration
   started: boolean
   stationInfo: ChargingStationInfo
@@ -37,11 +50,16 @@ export interface ChargingStationData extends WorkerData {
 export interface ChargingStationOptions extends JsonObject {
   autoRegister?: boolean
   autoStart?: boolean
+  baseName?: string
   enableStatistics?: boolean
+  fixedName?: boolean
+  nameSuffix?: string
   ocppStrictCompliance?: boolean
   persistentConfiguration?: boolean
   stopTransactionsOnStopped?: boolean
+  supervisionPassword?: string
   supervisionUrls?: string | string[]
+  supervisionUser?: string
 }
 
 export interface ChargingStationWorkerData extends WorkerData {
@@ -66,7 +84,3 @@ export const ChargingStationWorkerMessageEvents = {
 export type ChargingStationWorkerMessageEvents =
   | ChargingStationEvents
   | ChargingStationMessageEvents
-
-export type EvseStatusWorkerType = Omit<EvseStatus, 'connectors'> & {
-  connectors?: ConnectorStatus[]
-}

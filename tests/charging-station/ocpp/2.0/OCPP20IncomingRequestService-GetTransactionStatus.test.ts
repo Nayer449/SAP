@@ -17,7 +17,7 @@ import {
   standardCleanup,
 } from '../../../helpers/TestLifecycleHelpers.js'
 import { TEST_CHARGING_STATION_BASE_NAME } from '../../ChargingStationTestConstants.js'
-import { createMockChargingStation } from '../../ChargingStationTestUtils.js'
+import { createMockChargingStation } from '../../helpers/StationHelpers.js'
 
 await describe('D14 - GetTransactionStatus', async () => {
   let station: ChargingStation
@@ -28,12 +28,11 @@ await describe('D14 - GetTransactionStatus', async () => {
       baseName: TEST_CHARGING_STATION_BASE_NAME,
       connectorsCount: 3,
       evseConfiguration: { evsesCount: 3 },
-      heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
       stationInfo: {
         ocppStrictCompliance: false,
         ocppVersion: OCPPVersion.VERSION_201,
       },
-      websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+      websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
     })
     station = mockStation
     testableService = createTestableIncomingRequestService(new OCPP20IncomingRequestService())
@@ -57,7 +56,7 @@ await describe('D14 - GetTransactionStatus', async () => {
   await it('should not include ongoingIndicator when active transaction exists but no transactionId (E14.FR.06)', () => {
     const transactionId = 'txn-12345'
     setupConnectorWithTransaction(station, 1, {
-      transactionId: transactionId as unknown as number,
+      transactionId,
     })
 
     const response = testableService.handleRequestGetTransactionStatus(station, {})
@@ -82,7 +81,7 @@ await describe('D14 - GetTransactionStatus', async () => {
   await it('should return ongoingIndicator true when specific transactionId exists', () => {
     const transactionId = 'txn-67890'
     setupConnectorWithTransaction(station, 2, {
-      transactionId: transactionId as unknown as number,
+      transactionId,
     })
 
     const response = testableService.handleRequestGetTransactionStatus(station, {

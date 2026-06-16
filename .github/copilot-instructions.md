@@ -1,13 +1,13 @@
-# Copilot Instructions (repository-wide, language-agnostic)
+# Coding Agent Instructions (repository-wide, language-agnostic)
 
-These instructions guide GitHub Copilot to generate changes consistent with this repository's conventions, regardless of programming language.
+These instructions guide coding agents to generate changes consistent with this repository's conventions, regardless of programming language.
 
 ## Glossary
 
 - **Tunables**: user-adjustable parameters that shape behavior, exposed via options or configuration files.
 - **Canonical defaults**: the single, authoritative definition of all tunables and their defaults.
 
-## Implementation guidance for Copilot
+## Implementation guidance
 
 - **Before coding**:
   - Perform a comprehensive inventory of the codebase. Search for and read:
@@ -30,6 +30,12 @@ These instructions guide GitHub Copilot to generate changes consistent with this
   - Update code, tests, and documentation atomically.
 - **When documenting**:
   - Follow documentation conventions below.
+
+## Monorepo structure
+
+4 TypeScript packages (pnpm workspace: `/`, `/ui/common`, `/ui/cli`, `/ui/web`) + 1 Python project (`/tests/ocpp-server`). Each has its own quality gates — see sub-project READMEs.
+
+UI Common (`ui-common`) is the shared library for CLI and Web UI. No re-exports between packages.
 
 ## Core principles
 
@@ -89,6 +95,16 @@ Documentation serves as an operational specification, not narrative prose.
 - **Promise patterns**: Return Promises from async operations; store resolvers/rejectors in Maps for request/response flows.
 - **Immutability**: Avoid mutating shared state; clone objects before modification when needed.
 
+## Python conventions
+
+- **Naming**: Use snake_case for variables/functions/methods/modules, PascalCase for classes, SCREAMING_SNAKE_CASE for constants.
+- **Type hints**: Annotate all function signatures; use `mypy` with the strict-like configuration defined in `pyproject.toml`.
+- **Enumerations**: Prefer `StrEnum` for string-valued enumerations.
+- **Async operations**: Prefer async/await with `asyncio`; handle `CancelledError` and cleanup explicitly.
+- **Error handling**: Use specific exception types; avoid bare `except`.
+- **Formatting and linting**: Use `ruff` for formatting and linting; follow rules configured in `pyproject.toml`.
+- **Testing**: Use `pytest` with `pytest-asyncio`; use `async def test_*` naming, plain `assert`, and `pytest.raises` for error cases.
+
 ## OCPP-specific conventions
 
 - **Command naming**: Follow OCPP standard naming exactly (e.g., RemoteStartTransaction, BootNotification, StatusNotification).
@@ -101,9 +117,8 @@ Documentation serves as an operational specification, not narrative prose.
 
 ## Quality gates
 
-- Documented build/lint/type checks pass (where applicable).
-- Documented tests pass (where applicable).
-- Documentation updated to reflect changes when necessary.
+Each sub-project has its own quality gates (format, typecheck, lint, build, test). See sub-project READMEs for exact commands. Run gates for every sub-project affected by your changes.
+
 - Logs use appropriate levels (error, warn, info, debug).
 - Pull request title and commit messages follow [Conventional Commits](https://www.conventionalcommits.org/) format.
 
@@ -168,4 +183,4 @@ protected handleProtocolRequest(
 
 ---
 
-By following these instructions, Copilot should propose changes that are consistent and maintainable across languages.
+By following these instructions, coding agents should propose changes that are consistent and maintainable across languages.

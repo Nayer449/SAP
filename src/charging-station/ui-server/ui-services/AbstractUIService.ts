@@ -1,6 +1,6 @@
 import type { AbstractUIServer } from '../AbstractUIServer.js'
 
-import { BaseError, type OCPPError } from '../../../exception/index.js'
+import { BaseError, OCPPError } from '../../../exception/index.js'
 import {
   BroadcastChannelProcedureName,
   type BroadcastChannelRequestPayload,
@@ -20,8 +20,14 @@ import {
   type StorageConfiguration,
   type UUIDv4,
 } from '../../../types/index.js'
-import { Configuration, isAsyncFunction, isNotEmptyArray, logger } from '../../../utils/index.js'
-import { Bootstrap } from '../../Bootstrap.js'
+import {
+  Configuration,
+  ensureError,
+  getErrorMessage,
+  isAsyncFunction,
+  isNotEmptyArray,
+  logger,
+} from '../../../utils/index.js'
 import { UIServiceWorkerBroadcastChannel } from '../../broadcast-channel/UIServiceWorkerBroadcastChannel.js'
 import { DEFAULT_MAX_STATIONS, isValidNumberOfStations } from '../UIServerSecurity.js'
 
@@ -60,6 +66,7 @@ export abstract class AbstractUIService {
     ],
     [ProcedureName.GET_CERTIFICATE_STATUS, BroadcastChannelProcedureName.GET_CERTIFICATE_STATUS],
     [ProcedureName.HEARTBEAT, BroadcastChannelProcedureName.HEARTBEAT],
+    [ProcedureName.LOCK_CONNECTOR, BroadcastChannelProcedureName.LOCK_CONNECTOR],
     [ProcedureName.LOG_STATUS_NOTIFICATION, BroadcastChannelProcedureName.LOG_STATUS_NOTIFICATION],
     [ProcedureName.METER_VALUES, BroadcastChannelProcedureName.METER_VALUES],
     [
@@ -88,6 +95,7 @@ export abstract class AbstractUIService {
     [ProcedureName.STOP_CHARGING_STATION, BroadcastChannelProcedureName.STOP_CHARGING_STATION],
     [ProcedureName.STOP_TRANSACTION, BroadcastChannelProcedureName.STOP_TRANSACTION],
     [ProcedureName.TRANSACTION_EVENT, BroadcastChannelProcedureName.TRANSACTION_EVENT],
+    [ProcedureName.UNLOCK_CONNECTOR, BroadcastChannelProcedureName.UNLOCK_CONNECTOR],
   ])
 
   protected readonly requestHandlers: Map<ProcedureName, ProtocolRequestHandler>
@@ -144,8 +152,10 @@ export abstract class AbstractUIService {
       }
 
       // Call the request handler to build the response payload
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      const requestHandler = this.requestHandlers.get(command)!
+      const requestHandler = this.requestHandlers.get(command)
+      if (requestHandler == null) {
+        throw new BaseError(`'${command}' request handler not found`)
+      }
       if (isAsyncFunction(requestHandler)) {
         responsePayload = await requestHandler(uuid, command, requestPayload)
       } else {
@@ -162,9 +172,9 @@ export abstract class AbstractUIService {
       logger.error(`${this.logPrefix(moduleName, 'requestHandler')} Handle request error:`, error)
       responsePayload = {
         command,
-        errorDetails: (error as OCPPError).details,
-        errorMessage: (error as OCPPError).message,
-        errorStack: (error as OCPPError).stack,
+        errorDetails: error instanceof OCPPError ? error.details : undefined,
+        errorMessage: getErrorMessage(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
         hashIds: requestPayload?.hashIds,
         requestPayload,
         responsePayload,
@@ -229,7 +239,7 @@ export abstract class AbstractUIService {
   ): Promise<ResponsePayload> {
     const { numberOfStations, options, template } =
       requestPayload as AddChargingStationsRequestPayload
-    if (!Bootstrap.getInstance().getState().started) {
+    if (!this.uiServer.getBootstrap().getState().started) {
       return {
         errorMessage:
           'Cannot add charging station(s) while the charging stations simulator is not started',
@@ -265,16 +275,18 @@ export abstract class AbstractUIService {
     for (let i = 0; i < numberOfStations; i++) {
       let stationInfo: ChargingStationInfo | undefined
       try {
-        stationInfo = await Bootstrap.getInstance().addChargingStation(
-          Bootstrap.getInstance().getLastContiguousIndex(template) + 1,
-          `${template}.json`,
-          options
-        )
+        stationInfo = await this.uiServer
+          .getBootstrap()
+          .addChargingStation(
+            this.uiServer.getBootstrap().getLastContiguousIndex(template) + 1,
+            `${template}.json`,
+            options
+          )
         if (stationInfo != null) {
           succeededStationInfos.push(stationInfo)
         }
       } catch (error) {
-        err = error as Error
+        err = ensureError(error)
         if (stationInfo != null) {
           failedStationInfos.push(stationInfo)
         }
@@ -282,10 +294,10 @@ export abstract class AbstractUIService {
     }
     return {
       status: err != null ? ResponseStatus.FAILURE : ResponseStatus.SUCCESS,
-      ...(succeededStationInfos.length > 0 && {
+      ...(isNotEmptyArray(succeededStationInfos) && {
         hashIdsSucceeded: succeededStationInfos.map(stationInfo => stationInfo.hashId),
       }),
-      ...(failedStationInfos.length > 0 && {
+      ...(isNotEmptyArray(failedStationInfos) && {
         hashIdsFailed: failedStationInfos.map(stationInfo => stationInfo.hashId),
       }),
       ...(err != null && { errorMessage: err.message, errorStack: err.stack }),
@@ -320,14 +332,14 @@ export abstract class AbstractUIService {
     try {
       return {
         performanceStatistics: [
-          ...(Bootstrap.getInstance().getPerformanceStatistics() ?? []),
+          ...(this.uiServer.getBootstrap().getPerformanceStatistics() ?? []),
         ] as JsonType[],
         status: ResponseStatus.SUCCESS,
       } satisfies ResponsePayload
     } catch (error) {
       return {
-        errorMessage: (error as Error).message,
-        errorStack: (error as Error).stack,
+        errorMessage: getErrorMessage(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
         status: ResponseStatus.FAILURE,
       } satisfies ResponsePayload
     }
@@ -336,13 +348,13 @@ export abstract class AbstractUIService {
   private handleSimulatorState (): ResponsePayload {
     try {
       return {
-        state: Bootstrap.getInstance().getState() as unknown as JsonObject,
+        state: this.uiServer.getBootstrap().getState() as unknown as JsonObject,
         status: ResponseStatus.SUCCESS,
       } satisfies ResponsePayload
     } catch (error) {
       return {
-        errorMessage: (error as Error).message,
-        errorStack: (error as Error).stack,
+        errorMessage: getErrorMessage(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
         status: ResponseStatus.FAILURE,
       } satisfies ResponsePayload
     }
@@ -350,12 +362,12 @@ export abstract class AbstractUIService {
 
   private async handleStartSimulator (): Promise<ResponsePayload> {
     try {
-      await Bootstrap.getInstance().start()
+      await this.uiServer.getBootstrap().start()
       return { status: ResponseStatus.SUCCESS }
     } catch (error) {
       return {
-        errorMessage: (error as Error).message,
-        errorStack: (error as Error).stack,
+        errorMessage: getErrorMessage(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
         status: ResponseStatus.FAILURE,
       } satisfies ResponsePayload
     }
@@ -363,12 +375,12 @@ export abstract class AbstractUIService {
 
   private async handleStopSimulator (): Promise<ResponsePayload> {
     try {
-      await Bootstrap.getInstance().stop()
+      await this.uiServer.getBootstrap().stop()
       return { status: ResponseStatus.SUCCESS }
     } catch (error) {
       return {
-        errorMessage: (error as Error).message,
-        errorStack: (error as Error).stack,
+        errorMessage: getErrorMessage(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
         status: ResponseStatus.FAILURE,
       } satisfies ResponsePayload
     }

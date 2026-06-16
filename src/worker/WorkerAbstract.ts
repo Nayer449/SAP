@@ -16,8 +16,8 @@ export abstract class WorkerAbstract<D extends WorkerData, R extends WorkerData>
 
   /**
    * `WorkerAbstract` constructor.
-   * @param workerScript -
-   * @param workerOptions -
+   * @param workerScript - Path to the worker script file
+   * @param workerOptions - Worker configuration options
    */
   constructor (workerScript: string | undefined, workerOptions: WorkerOptions) {
     if (workerScript == null) {
@@ -29,11 +29,11 @@ export abstract class WorkerAbstract<D extends WorkerData, R extends WorkerData>
     if (workerScript.trim().length === 0) {
       throw new Error('Worker script is an empty string')
     }
-    const workerScriptStats = statSync(workerScript, { throwIfNoEntry: false })
-    if (workerScriptStats == null) {
+    const workerScriptStatistics = statSync(workerScript, { throwIfNoEntry: false })
+    if (workerScriptStatistics == null) {
       throw new Error(`Worker script file does not exist: '${workerScript}'`)
     }
-    if (!workerScriptStats.isFile()) {
+    if (!workerScriptStatistics.isFile()) {
       throw new Error(`Worker script is not a regular file: '${workerScript}'`)
     }
     this.workerScript = workerScript
@@ -42,7 +42,7 @@ export abstract class WorkerAbstract<D extends WorkerData, R extends WorkerData>
 
   /**
    * Adds a task element to the worker pool/set.
-   * @param elementData -
+   * @param elementData - The element data to process
    */
   public abstract addElement (elementData: D): Promise<R>
   /**

@@ -14,7 +14,7 @@ import {
   type TestableOCPP20RequestService,
 } from '../../../../src/charging-station/ocpp/2.0/__testable__/index.js'
 import {
-  FirmwareStatusEnumType,
+  OCPP20FirmwareStatusEnumType,
   type OCPP20FirmwareStatusNotificationRequest,
   type OCPP20FirmwareStatusNotificationResponse,
   OCPP20RequestCommand,
@@ -23,7 +23,7 @@ import {
 import { Constants } from '../../../../src/utils/index.js'
 import { standardCleanup } from '../../../helpers/TestLifecycleHelpers.js'
 import { TEST_CHARGING_STATION_BASE_NAME } from '../../ChargingStationTestConstants.js'
-import { createMockChargingStation } from '../../ChargingStationTestUtils.js'
+import { createMockChargingStation } from '../../helpers/StationHelpers.js'
 
 await describe('J01 - FirmwareStatusNotification', async () => {
   let station: ChargingStation
@@ -35,12 +35,11 @@ await describe('J01 - FirmwareStatusNotification', async () => {
       baseName: TEST_CHARGING_STATION_BASE_NAME,
       connectorsCount: 1,
       evseConfiguration: { evsesCount: 1 },
-      heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
       stationInfo: {
         ocppStrictCompliance: false,
         ocppVersion: OCPPVersion.VERSION_201,
       },
-      websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+      websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
     })
     station = newStation
 
@@ -56,13 +55,16 @@ await describe('J01 - FirmwareStatusNotification', async () => {
   })
 
   await it('should send FirmwareStatusNotification with Downloading status', async () => {
-    await service.requestFirmwareStatusNotification(station, FirmwareStatusEnumType.Downloading, 42)
+    await service.requestHandler(station, OCPP20RequestCommand.FIRMWARE_STATUS_NOTIFICATION, {
+      requestId: 42,
+      status: OCPP20FirmwareStatusEnumType.Downloading,
+    })
 
     assert.strictEqual(sendMessageMock.mock.calls.length, 1)
 
     const sentPayload = sendMessageMock.mock.calls[0]
       .arguments[2] as OCPP20FirmwareStatusNotificationRequest
-    assert.strictEqual(sentPayload.status, FirmwareStatusEnumType.Downloading)
+    assert.strictEqual(sentPayload.status, OCPP20FirmwareStatusEnumType.Downloading)
     assert.strictEqual(sentPayload.requestId, 42)
 
     const commandName = sendMessageMock.mock.calls[0].arguments[3]
@@ -72,26 +74,27 @@ await describe('J01 - FirmwareStatusNotification', async () => {
   await it('should include requestId when provided', async () => {
     const testRequestId = 99
 
-    await service.requestFirmwareStatusNotification(
-      station,
-      FirmwareStatusEnumType.Installed,
-      testRequestId
-    )
+    await service.requestHandler(station, OCPP20RequestCommand.FIRMWARE_STATUS_NOTIFICATION, {
+      requestId: testRequestId,
+      status: OCPP20FirmwareStatusEnumType.Installed,
+    })
 
     assert.strictEqual(sendMessageMock.mock.calls.length, 1)
 
     const sentPayload = sendMessageMock.mock.calls[0]
       .arguments[2] as OCPP20FirmwareStatusNotificationRequest
-    assert.strictEqual(sentPayload.status, FirmwareStatusEnumType.Installed)
+    assert.strictEqual(sentPayload.status, OCPP20FirmwareStatusEnumType.Installed)
     assert.strictEqual(sentPayload.requestId, testRequestId)
   })
 
   await it('should return empty response from CSMS', async () => {
-    const response = await service.requestFirmwareStatusNotification(
-      station,
-      FirmwareStatusEnumType.Downloaded,
-      1
-    )
+    const response = await service.requestHandler<
+      OCPP20FirmwareStatusNotificationRequest,
+      OCPP20FirmwareStatusNotificationResponse
+    >(station, OCPP20RequestCommand.FIRMWARE_STATUS_NOTIFICATION, {
+      requestId: 1,
+      status: OCPP20FirmwareStatusEnumType.Downloaded,
+    })
 
     assert.notStrictEqual(response, undefined)
     assert.strictEqual(typeof response, 'object')

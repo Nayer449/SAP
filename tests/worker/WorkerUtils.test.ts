@@ -5,37 +5,17 @@
 import assert from 'node:assert/strict'
 import { afterEach, describe, it } from 'node:test'
 
-import { WorkerProcessType } from '../../src/worker/WorkerTypes.js'
 import {
-  checkWorkerProcessType,
   defaultErrorHandler,
   defaultExitHandler,
   randomizeDelay,
   sleep,
-} from '../../src/worker/WorkerUtils.js'
+} from '../../src/worker/index.js'
 import { standardCleanup, withMockTimers } from '../helpers/TestLifecycleHelpers.js'
 
 await describe('WorkerUtils', async () => {
   afterEach(() => {
     standardCleanup()
-  })
-
-  await it('should validate worker process types correctly', () => {
-    // Valid worker process types should not throw
-    assert.doesNotThrow(() => {
-      checkWorkerProcessType(WorkerProcessType.dynamicPool)
-    })
-    assert.doesNotThrow(() => {
-      checkWorkerProcessType(WorkerProcessType.fixedPool)
-    })
-    assert.doesNotThrow(() => {
-      checkWorkerProcessType(WorkerProcessType.workerSet)
-    })
-
-    // Invalid worker process type should throw
-    assert.throws(() => {
-      checkWorkerProcessType('invalidType' as WorkerProcessType)
-    }, SyntaxError)
   })
 
   await it('should return timeout object after specified delay', async t => {
@@ -112,24 +92,24 @@ await describe('WorkerUtils', async () => {
       results.push(randomized)
 
       // Each result should be within ±20% of base delay
-      assert.ok(randomized >= baseDelay - tolerance)
-      assert.ok(randomized <= baseDelay + tolerance)
+      assert.strictEqual(randomized >= baseDelay - tolerance, true)
+      assert.strictEqual(randomized <= baseDelay + tolerance, true)
     }
 
     // Verify we get some variation (not all values identical)
     const uniqueValues = new Set(results)
-    assert.ok(uniqueValues.size > 1)
+    assert.strictEqual(uniqueValues.size > 1, true)
 
     // Test with zero delay
     const zeroResult = randomizeDelay(0)
-    assert.ok(zeroResult >= 0)
-    assert.ok(zeroResult <= 0)
+    assert.strictEqual(zeroResult >= 0, true)
+    assert.strictEqual(zeroResult <= 0, true)
 
     // Test with negative delay (edge case)
     const negativeDelay = -100
     const negativeResult = randomizeDelay(negativeDelay)
     const negativeTolerance = Math.abs(negativeDelay) * 0.2
-    assert.ok(negativeResult >= negativeDelay - negativeTolerance)
-    assert.ok(negativeResult <= negativeDelay + negativeTolerance)
+    assert.strictEqual(negativeResult >= negativeDelay - negativeTolerance, true)
+    assert.strictEqual(negativeResult <= negativeDelay + negativeTolerance, true)
   })
 })

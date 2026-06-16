@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 
-import type { MockChargingStation } from '../../ChargingStationTestUtils.js'
+import type { MockChargingStation } from '../../helpers/StationHelpers.js'
 
 import { OCPP20ResponseService } from '../../../../src/charging-station/ocpp/2.0/OCPP20ResponseService.js'
 import {
@@ -19,7 +19,7 @@ import {
 import { Constants } from '../../../../src/utils/index.js'
 import { standardCleanup } from '../../../helpers/TestLifecycleHelpers.js'
 import { TEST_CHARGING_STATION_BASE_NAME } from '../../ChargingStationTestConstants.js'
-import { createMockChargingStation } from '../../ChargingStationTestUtils.js'
+import { createMockChargingStation } from '../../helpers/StationHelpers.js'
 
 /**
  * Create a mock station suitable for simple response handler tests.
@@ -30,14 +30,13 @@ function createSimpleHandlerStation (): MockChargingStation {
   const { station } = createMockChargingStation({
     baseName: TEST_CHARGING_STATION_BASE_NAME,
     connectorsCount: 1,
-    heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
     stationInfo: {
       ocppStrictCompliance: false,
       ocppVersion: OCPPVersion.VERSION_201,
     },
-    websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+    websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
   })
-  return station as MockChargingStation
+  return station
 }
 
 await describe('Simple response handlers', async () => {
@@ -58,12 +57,7 @@ await describe('Simple response handlers', async () => {
     await it('should handle Heartbeat response without throwing', async () => {
       const payload: OCPP20HeartbeatResponse = { currentTime: new Date() }
       await assert.doesNotReject(
-        responseService.responseHandler(
-          mockStation,
-          OCPP20RequestCommand.HEARTBEAT,
-          payload as unknown as Parameters<typeof responseService.responseHandler>[2],
-          {} as Parameters<typeof responseService.responseHandler>[3]
-        )
+        responseService.responseHandler(mockStation, OCPP20RequestCommand.HEARTBEAT, payload, {})
       )
     })
   })
@@ -75,8 +69,8 @@ await describe('Simple response handlers', async () => {
         responseService.responseHandler(
           mockStation,
           OCPP20RequestCommand.NOTIFY_REPORT,
-          payload as unknown as Parameters<typeof responseService.responseHandler>[2],
-          {} as Parameters<typeof responseService.responseHandler>[3]
+          payload,
+          {}
         )
       )
     })
@@ -89,8 +83,8 @@ await describe('Simple response handlers', async () => {
         responseService.responseHandler(
           mockStation,
           OCPP20RequestCommand.STATUS_NOTIFICATION,
-          payload as unknown as Parameters<typeof responseService.responseHandler>[2],
-          {} as Parameters<typeof responseService.responseHandler>[3]
+          payload,
+          {}
         )
       )
     })

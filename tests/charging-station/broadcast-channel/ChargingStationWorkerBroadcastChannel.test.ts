@@ -17,20 +17,18 @@ import {
   GenericStatus,
   GetCertificateStatusEnumType,
   Iso15118EVCertificateStatusEnumType,
+  MeterValueMeasurand,
   OCPP20AuthorizationStatusEnumType,
-  OCPP20RequestCommand,
   OCPPVersion,
   ProcedureName,
   RequestCommand,
   ResponseStatus,
 } from '../../../src/types/index.js'
 import { Constants } from '../../../src/utils/index.js'
-import { standardCleanup } from '../../helpers/TestLifecycleHelpers.js'
-import { createMockChargingStation } from '../ChargingStationTestUtils.js'
-import {
-  createMockStationWithRequestTracking,
-  createOCPP20RequestTestContext,
-} from '../ocpp/2.0/OCPP20TestUtils.js'
+import { flushMicrotasks, standardCleanup } from '../../helpers/TestLifecycleHelpers.js'
+import { TEST_TRANSACTION_ID_STRING } from '../ChargingStationTestConstants.js'
+import { createMockChargingStation } from '../helpers/StationHelpers.js'
+import { createMockStationWithRequestTracking } from '../ocpp/2.0/OCPP20TestUtils.js'
 
 // ============================================================================
 // Testable Interfaces
@@ -183,9 +181,8 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
     await it('should return SUCCESS for SIGN_CERTIFICATE with Accepted status', () => {
       const { station } = createMockChargingStation({
         connectorsCount: 1,
-        heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
         stationInfo: { ocppVersion: OCPPVersion.VERSION_201 },
-        websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+        websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
       })
 
       instance = new ChargingStationWorkerBroadcastChannel(station)
@@ -202,9 +199,8 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
     await it('should return FAILURE for SIGN_CERTIFICATE with Rejected status', () => {
       const { station } = createMockChargingStation({
         connectorsCount: 1,
-        heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
         stationInfo: { ocppVersion: OCPPVersion.VERSION_201 },
-        websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+        websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
       })
 
       instance = new ChargingStationWorkerBroadcastChannel(station)
@@ -223,9 +219,8 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
     await it('should return SUCCESS for GET_15118_EV_CERTIFICATE with Accepted status', () => {
       const { station } = createMockChargingStation({
         connectorsCount: 1,
-        heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
         stationInfo: { ocppVersion: OCPPVersion.VERSION_201 },
-        websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+        websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
       })
 
       instance = new ChargingStationWorkerBroadcastChannel(station)
@@ -242,9 +237,8 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
     await it('should return FAILURE for GET_15118_EV_CERTIFICATE with Failed status', () => {
       const { station } = createMockChargingStation({
         connectorsCount: 1,
-        heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
         stationInfo: { ocppVersion: OCPPVersion.VERSION_201 },
-        websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+        websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
       })
 
       instance = new ChargingStationWorkerBroadcastChannel(station)
@@ -263,9 +257,8 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
     await it('should return SUCCESS for GET_CERTIFICATE_STATUS with Accepted status', () => {
       const { station } = createMockChargingStation({
         connectorsCount: 1,
-        heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
         stationInfo: { ocppVersion: OCPPVersion.VERSION_201 },
-        websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+        websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
       })
 
       instance = new ChargingStationWorkerBroadcastChannel(station)
@@ -282,9 +275,8 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
     await it('should return FAILURE for GET_CERTIFICATE_STATUS with Failed status', () => {
       const { station } = createMockChargingStation({
         connectorsCount: 1,
-        heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
         stationInfo: { ocppVersion: OCPPVersion.VERSION_201 },
-        websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+        websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
       })
 
       instance = new ChargingStationWorkerBroadcastChannel(station)
@@ -303,9 +295,8 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
     await it('should return SUCCESS for LOG_STATUS_NOTIFICATION with empty response', () => {
       const { station } = createMockChargingStation({
         connectorsCount: 1,
-        heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
         stationInfo: { ocppVersion: OCPPVersion.VERSION_201 },
-        websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+        websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
       })
 
       instance = new ChargingStationWorkerBroadcastChannel(station)
@@ -322,9 +313,8 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
     await it('should return FAILURE for LOG_STATUS_NOTIFICATION with non-empty response', () => {
       const { station } = createMockChargingStation({
         connectorsCount: 1,
-        heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
         stationInfo: { ocppVersion: OCPPVersion.VERSION_201 },
-        websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+        websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
       })
 
       instance = new ChargingStationWorkerBroadcastChannel(station)
@@ -341,9 +331,8 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
     await it('should return SUCCESS for NOTIFY_CUSTOMER_INFORMATION with empty response', () => {
       const { station } = createMockChargingStation({
         connectorsCount: 1,
-        heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
         stationInfo: { ocppVersion: OCPPVersion.VERSION_201 },
-        websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+        websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
       })
 
       instance = new ChargingStationWorkerBroadcastChannel(station)
@@ -360,9 +349,8 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
     await it('should return FAILURE for NOTIFY_CUSTOMER_INFORMATION with non-empty response', () => {
       const { station } = createMockChargingStation({
         connectorsCount: 1,
-        heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
         stationInfo: { ocppVersion: OCPPVersion.VERSION_201 },
-        websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+        websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
       })
 
       instance = new ChargingStationWorkerBroadcastChannel(station)
@@ -379,9 +367,8 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
     await it('should return SUCCESS for NOTIFY_REPORT with empty response', () => {
       const { station } = createMockChargingStation({
         connectorsCount: 1,
-        heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
         stationInfo: { ocppVersion: OCPPVersion.VERSION_201 },
-        websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+        websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
       })
 
       instance = new ChargingStationWorkerBroadcastChannel(station)
@@ -398,9 +385,8 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
     await it('should return FAILURE for NOTIFY_REPORT with non-empty response', () => {
       const { station } = createMockChargingStation({
         connectorsCount: 1,
-        heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
         stationInfo: { ocppVersion: OCPPVersion.VERSION_201 },
-        websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+        websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
       })
 
       instance = new ChargingStationWorkerBroadcastChannel(station)
@@ -417,9 +403,8 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
     await it('should return SUCCESS for SECURITY_EVENT_NOTIFICATION with empty response', () => {
       const { station } = createMockChargingStation({
         connectorsCount: 1,
-        heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
         stationInfo: { ocppVersion: OCPPVersion.VERSION_201 },
-        websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+        websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
       })
 
       instance = new ChargingStationWorkerBroadcastChannel(station)
@@ -436,9 +421,8 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
     await it('should return FAILURE for SECURITY_EVENT_NOTIFICATION with non-empty response', () => {
       const { station } = createMockChargingStation({
         connectorsCount: 1,
-        heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
         stationInfo: { ocppVersion: OCPPVersion.VERSION_201 },
-        websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+        websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
       })
 
       instance = new ChargingStationWorkerBroadcastChannel(station)
@@ -457,9 +441,8 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
     await it('should return SUCCESS for TRANSACTION_EVENT with empty response', () => {
       const { station } = createMockChargingStation({
         connectorsCount: 1,
-        heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
         stationInfo: { ocppVersion: OCPPVersion.VERSION_201 },
-        websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+        websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
       })
 
       instance = new ChargingStationWorkerBroadcastChannel(station)
@@ -477,9 +460,8 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
     await it('should return SUCCESS for TRANSACTION_EVENT with no idTokenInfo', () => {
       const { station } = createMockChargingStation({
         connectorsCount: 1,
-        heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
         stationInfo: { ocppVersion: OCPPVersion.VERSION_201 },
-        websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+        websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
       })
 
       instance = new ChargingStationWorkerBroadcastChannel(station)
@@ -497,9 +479,8 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
     await it('should return SUCCESS for TRANSACTION_EVENT with Accepted idTokenInfo', () => {
       const { station } = createMockChargingStation({
         connectorsCount: 1,
-        heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
         stationInfo: { ocppVersion: OCPPVersion.VERSION_201 },
-        websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+        websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
       })
 
       instance = new ChargingStationWorkerBroadcastChannel(station)
@@ -516,9 +497,8 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
     await it('should return FAILURE for TRANSACTION_EVENT with Blocked idTokenInfo', () => {
       const { station } = createMockChargingStation({
         connectorsCount: 1,
-        heartbeatInterval: Constants.DEFAULT_HEARTBEAT_INTERVAL,
         stationInfo: { ocppVersion: OCPPVersion.VERSION_201 },
-        websocketPingInterval: Constants.DEFAULT_WEBSOCKET_PING_INTERVAL,
+        websocketPingInterval: Constants.DEFAULT_WS_PING_INTERVAL_SECONDS,
       })
 
       instance = new ChargingStationWorkerBroadcastChannel(station)
@@ -530,65 +510,6 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
       )
 
       assert.strictEqual(status, ResponseStatus.FAILURE)
-    })
-  })
-
-  // ==========================================================================
-  // Group 3: buildRequestPayload — OCPP 2.0.1 certificate passthrough (3 tests)
-  // ==========================================================================
-
-  await describe('buildRequestPayload OCPP 2.0.1 certificate passthrough', async () => {
-    await it('should build GET_15118_EV_CERTIFICATE payload as passthrough', () => {
-      const { station, testableRequestService } = createOCPP20RequestTestContext()
-      const commandParams = {
-        action: 'Install',
-        exiRequest: 'base64EncodedData',
-        iso15118SchemaVersion: 'urn:iso:15118:2:2013:MsgDef',
-      }
-
-      const payload = testableRequestService.buildRequestPayload(
-        station,
-        OCPP20RequestCommand.GET_15118_EV_CERTIFICATE,
-        commandParams
-      )
-
-      assert.deepStrictEqual(payload, commandParams)
-    })
-
-    await it('should build GET_CERTIFICATE_STATUS payload as passthrough', () => {
-      const { station, testableRequestService } = createOCPP20RequestTestContext()
-      const commandParams = {
-        ocspRequestData: {
-          hashAlgorithm: 'SHA256',
-          issuerKeyHash: 'abc123def456issuerkeyhash',
-          issuerNameHash: 'abc123def456issuernamehash',
-          responderURL: 'http://ocsp.example.com',
-          serialNumber: '1234567890',
-        },
-      }
-
-      const payload = testableRequestService.buildRequestPayload(
-        station,
-        OCPP20RequestCommand.GET_CERTIFICATE_STATUS,
-        commandParams
-      )
-
-      assert.deepStrictEqual(payload, commandParams)
-    })
-
-    await it('should build SIGN_CERTIFICATE payload as passthrough', () => {
-      const { station, testableRequestService } = createOCPP20RequestTestContext()
-      const commandParams = {
-        csr: '-----BEGIN CERTIFICATE REQUEST-----\nMIIBkTCB...\n-----END CERTIFICATE REQUEST-----',
-      }
-
-      const payload = testableRequestService.buildRequestPayload(
-        station,
-        OCPP20RequestCommand.SIGN_CERTIFICATE,
-        commandParams
-      )
-
-      assert.deepStrictEqual(payload, commandParams)
     })
   })
 
@@ -713,9 +634,7 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
         ],
       })
 
-      await new Promise(resolve => {
-        setTimeout(resolve, 50)
-      })
+      await flushMicrotasks()
 
       assert.strictEqual(sentRequests.length, 1)
       assert.strictEqual(sentRequests[0].command, RequestCommand.GET_15118_EV_CERTIFICATE)
@@ -735,9 +654,7 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
         ],
       })
 
-      await new Promise(resolve => {
-        setTimeout(resolve, 50)
-      })
+      await flushMicrotasks()
 
       assert.strictEqual(sentRequests.length, 1)
       assert.strictEqual(sentRequests[0].command, RequestCommand.LOG_STATUS_NOTIFICATION)
@@ -757,9 +674,7 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
         ],
       })
 
-      await new Promise(resolve => {
-        setTimeout(resolve, 50)
-      })
+      await flushMicrotasks()
 
       assert.strictEqual(sentRequests.length, 1)
       assert.strictEqual(sentRequests[0].command, RequestCommand.NOTIFY_CUSTOMER_INFORMATION)
@@ -779,9 +694,7 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
         ],
       })
 
-      await new Promise(resolve => {
-        setTimeout(resolve, 50)
-      })
+      await flushMicrotasks()
 
       assert.strictEqual(sentRequests.length, 1)
       assert.strictEqual(sentRequests[0].command, RequestCommand.NOTIFY_REPORT)
@@ -801,9 +714,7 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
         ],
       })
 
-      await new Promise(resolve => {
-        setTimeout(resolve, 50)
-      })
+      await flushMicrotasks()
 
       assert.strictEqual(sentRequests.length, 1)
       assert.strictEqual(sentRequests[0].command, RequestCommand.SECURITY_EVENT_NOTIFICATION)
@@ -812,6 +723,19 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
     await it('should dispatch METER_VALUES for OCPP 2.0.1 via requestHandler', async () => {
       const { sentRequests, station } = createMockStationWithRequestTracking()
 
+      // Add MeterValues template to connector 1 so buildMeterValue can construct a valid payload
+      const connectorStatus = station.getConnectorStatus(1)
+      if (connectorStatus != null) {
+        connectorStatus.MeterValues = [
+          {
+            measurand: MeterValueMeasurand.ENERGY_ACTIVE_IMPORT_REGISTER,
+            unit: 'Wh',
+            value: 0,
+          },
+        ]
+        connectorStatus.transactionId = TEST_TRANSACTION_ID_STRING
+      }
+
       instance = new ChargingStationWorkerBroadcastChannel(station)
       const testable = createTestableWorkerBroadcastChannel(instance)
 
@@ -819,16 +743,22 @@ await describe('ChargingStationWorkerBroadcastChannel', async () => {
         data: [
           randomUUID(),
           BroadcastChannelProcedureName.METER_VALUES,
-          { hashIds: [station.stationInfo?.hashId] },
+          { connectorId: 1, hashIds: [station.stationInfo?.hashId] },
         ],
       })
 
-      await new Promise(resolve => {
-        setTimeout(resolve, 50)
-      })
+      await flushMicrotasks()
 
       assert.strictEqual(sentRequests.length, 1)
       assert.strictEqual(sentRequests[0].command, RequestCommand.METER_VALUES)
+      assert.ok(
+        sentRequests[0].payload.evseId != null,
+        'OCPP 2.0.1 meter values payload should contain evseId'
+      )
+      assert.ok(
+        Array.isArray(sentRequests[0].payload.meterValue),
+        'OCPP 2.0.1 meter values payload should contain meterValue array'
+      )
     })
   })
 

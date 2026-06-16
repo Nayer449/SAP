@@ -5,12 +5,12 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 
-import type { ChargingStation } from '../../src/charging-station/ChargingStation.js'
+import type { ChargingStation } from '../../src/charging-station/index.js'
 
-import { OCPP16RequestCommand, RegistrationStatusEnumType } from '../../src/types/index.js'
+import { RegistrationStatusEnumType, RequestCommand } from '../../src/types/index.js'
 import { standardCleanup } from '../helpers/TestLifecycleHelpers.js'
 import { TEST_HEARTBEAT_INTERVAL_MS } from './ChargingStationTestConstants.js'
-import { cleanupChargingStation, createMockChargingStation } from './ChargingStationTestUtils.js'
+import { cleanupChargingStation, createMockChargingStation } from './helpers/StationHelpers.js'
 
 await describe('ChargingStation Resilience', async () => {
   await describe('Error Recovery and Resilience', async () => {
@@ -118,7 +118,7 @@ await describe('ChargingStation Resilience', async () => {
       mocks.webSocket.simulateMessage('invalid json')
 
       // Assert - Station should still be operational (not crashed)
-      assert.ok(station.connectors.size > 0)
+      assert.strictEqual(station.getNumberOfConnectors() > 0, true)
     })
 
     await it('should handle WebSocket error event gracefully', () => {
@@ -154,7 +154,7 @@ await describe('ChargingStation Resilience', async () => {
       station.requests.set(messageId, [
         responseCallback,
         errorCallback,
-        OCPP16RequestCommand.HEARTBEAT,
+        RequestCommand.HEARTBEAT,
         {},
       ])
 
@@ -196,7 +196,7 @@ await describe('ChargingStation Resilience', async () => {
       mocks.webSocket.simulateClose(1006, 'Server unreachable')
 
       // Assert - Station should remain in valid state
-      assert.ok(station.connectors.size > 0)
+      assert.strictEqual(station.getNumberOfConnectors() > 0, true)
       assert.strictEqual(mocks.webSocket.readyState, 3) // CLOSED
     })
 
@@ -267,7 +267,7 @@ await describe('ChargingStation Resilience', async () => {
       // Set up a heartbeat timer (simulated)
       station.heartbeatSetInterval = setInterval(() => {
         /* empty */
-      }, TEST_HEARTBEAT_INTERVAL_MS) as unknown as NodeJS.Timeout
+      }, TEST_HEARTBEAT_INTERVAL_MS)
 
       // Act - Cleanup station
       cleanupChargingStation(station)
@@ -293,10 +293,10 @@ await describe('ChargingStation Resilience', async () => {
       station.requests.set('req-1', [
         callback1,
         errorCallback1,
-        OCPP16RequestCommand.BOOT_NOTIFICATION,
+        RequestCommand.BOOT_NOTIFICATION,
         {},
       ])
-      station.requests.set('req-2', [callback2, errorCallback2, OCPP16RequestCommand.HEARTBEAT, {}])
+      station.requests.set('req-2', [callback2, errorCallback2, RequestCommand.HEARTBEAT, {}])
 
       // Act - Cleanup station
       cleanupChargingStation(station)
@@ -362,7 +362,7 @@ await describe('ChargingStation Resilience', async () => {
       // Note: Due to async nature, the message may be sent or buffered depending on timing
       // This test verifies the message is queued at minimum
       const stationWithQueue = station as unknown as { messageQueue: string[] }
-      assert.ok(stationWithQueue.messageQueue.length >= 0)
+      assert.strictEqual(stationWithQueue.messageQueue.length >= 0, true)
     })
 
     await it('should flush messages in FIFO order when connection restored', () => {

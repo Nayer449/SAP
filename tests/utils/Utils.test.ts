@@ -1,34 +1,35 @@
-import { hoursToMilliseconds, hoursToSeconds } from 'date-fns'
-import { CircularBuffer } from 'mnemonist'
 /**
  * @file Tests for Utils
  * @description Unit tests for general utility functions
  */
+
+import { hoursToMilliseconds, hoursToSeconds } from 'date-fns'
+import { CircularBuffer } from 'mnemonist'
 import assert from 'node:assert/strict'
 import { randomInt } from 'node:crypto'
-import process from 'node:process'
-import { version } from 'node:process'
+import process, { version } from 'node:process'
 import { afterEach, describe, it } from 'node:test'
 import { satisfies } from 'semver'
 
 import type { TimestampedData } from '../../src/types/index.js'
 
 import { JSRuntime, runtime } from '../../scripts/runtime.js'
-import { MapStringifyFormat } from '../../src/types/index.js'
-import { Constants } from '../../src/utils/Constants.js'
+import { MapStringifyFormat, MessageType } from '../../src/types/index.js'
+import { Constants } from '../../src/utils/index.js'
 import {
   clampToSafeTimerValue,
   clone,
+  computeExponentialBackOffDelay,
   convertToBoolean,
   convertToDate,
   convertToFloat,
   convertToInt,
   convertToIntOrNaN,
-  exponentialDelay,
   extractTimeSeriesValues,
   formatDurationMilliSeconds,
   formatDurationSeconds,
   generateUUID,
+  getMessageTypeString,
   getRandomFloat,
   getRandomFloatFluctuatedRounded,
   getRandomFloatRounded,
@@ -46,13 +47,15 @@ import {
   logPrefix,
   mergeDeepRight,
   once,
+  promiseWithTimeout,
   queueMicrotaskErrorThrowing,
   roundTo,
   secureRandom,
   sleep,
+  truncateId,
   validateIdentifierString,
   validateUUID,
-} from '../../src/utils/Utils.js'
+} from '../../src/utils/index.js'
 import { standardCleanup, withMockTimers } from '../helpers/TestLifecycleHelpers.js'
 
 await describe('Utils', async () => {
@@ -212,6 +215,7 @@ await describe('Utils', async () => {
     assert.strictEqual(convertToBoolean('false'), false)
     assert.strictEqual(convertToBoolean('TRUE'), true)
     assert.strictEqual(convertToBoolean('FALSE'), false)
+    assert.strictEqual(convertToBoolean('True'), true)
     assert.strictEqual(convertToBoolean('1'), true)
     assert.strictEqual(convertToBoolean('0'), false)
     assert.strictEqual(convertToBoolean(1), true)
@@ -220,13 +224,18 @@ await describe('Utils', async () => {
     assert.strictEqual(convertToBoolean(false), false)
     assert.strictEqual(convertToBoolean(''), false)
     assert.strictEqual(convertToBoolean('NoNBoolean'), false)
+    assert.strictEqual(convertToBoolean(2), false)
+    assert.strictEqual(convertToBoolean(' true '), true)
+    assert.strictEqual(convertToBoolean(' 1 '), true)
+    assert.strictEqual(convertToBoolean(' false '), false)
+    assert.strictEqual(convertToBoolean(' TRUE '), true)
   })
 
   await it('should generate cryptographically secure random numbers between 0 and 1', () => {
     const random = secureRandom()
     assert.ok(typeof random === 'number')
-    assert.ok(random >= 0)
-    assert.ok(random < 1)
+    assert.strictEqual(random >= 0, true)
+    assert.strictEqual(random < 1, true)
   })
 
   await it('should round numbers to specified decimal places correctly', () => {
@@ -247,8 +256,8 @@ await describe('Utils', async () => {
   await it('should generate random floats within specified range', () => {
     let randomFloat = getRandomFloat()
     assert.ok(typeof randomFloat === 'number')
-    assert.ok(randomFloat >= 0)
-    assert.ok(randomFloat <= Number.MAX_VALUE)
+    assert.strictEqual(randomFloat >= 0, true)
+    assert.strictEqual(randomFloat <= Number.MAX_VALUE, true)
     assert.notDeepStrictEqual(randomFloat, getRandomFloat())
     assert.throws(
       () => {
@@ -263,8 +272,8 @@ await describe('Utils', async () => {
       { message: /Invalid interval/ }
     )
     randomFloat = getRandomFloat(0, -Number.MAX_VALUE)
-    assert.ok(randomFloat >= -Number.MAX_VALUE)
-    assert.ok(randomFloat <= 0)
+    assert.strictEqual(randomFloat >= -Number.MAX_VALUE, true)
+    assert.strictEqual(randomFloat <= 0, true)
   })
 
   await it('should extract numeric values from timestamped circular buffer', () => {
@@ -528,168 +537,183 @@ await describe('Utils', async () => {
     )
   })
 
-  await it('should clamp values to safe timer range (0 to MAX_SETINTERVAL_DELAY)', () => {
+  await it('should clamp values to safe timer range (0 to MAX_SETINTERVAL_DELAY_MS)', () => {
     assert.strictEqual(clampToSafeTimerValue(0), 0)
     assert.strictEqual(clampToSafeTimerValue(1000), 1000)
     assert.strictEqual(
-      clampToSafeTimerValue(Constants.MAX_SETINTERVAL_DELAY),
-      Constants.MAX_SETINTERVAL_DELAY
+      clampToSafeTimerValue(Constants.MAX_SETINTERVAL_DELAY_MS),
+      Constants.MAX_SETINTERVAL_DELAY_MS
     )
     assert.strictEqual(
-      clampToSafeTimerValue(Constants.MAX_SETINTERVAL_DELAY + 1),
-      Constants.MAX_SETINTERVAL_DELAY
+      clampToSafeTimerValue(Constants.MAX_SETINTERVAL_DELAY_MS + 1),
+      Constants.MAX_SETINTERVAL_DELAY_MS
     )
     assert.strictEqual(
       clampToSafeTimerValue(Number.MAX_SAFE_INTEGER),
-      Constants.MAX_SETINTERVAL_DELAY
+      Constants.MAX_SETINTERVAL_DELAY_MS
     )
     assert.strictEqual(clampToSafeTimerValue(-1), 0)
     assert.strictEqual(clampToSafeTimerValue(-1000), 0)
   })
 
-  // -------------------------------------------------------------------------
-  // Exponential Backoff Algorithm Tests (WebSocket Reconnection)
-  // -------------------------------------------------------------------------
+  await describe('computeExponentialBackOffDelay', async () => {
+    await it('should calculate exponential delay with default-like parameters', () => {
+      const baseDelayMs = 100
 
-  await it('should calculate exponential delay with default parameters', () => {
-    // Formula: delay = 2^retryNumber * delayFactor + (0-20% random jitter)
-    // With default delayFactor = 100ms
+      // retryNumber = 0: 2^0 * 100 = 100ms base, no jitter
+      const delay0 = computeExponentialBackOffDelay({ baseDelayMs, retryNumber: 0 })
+      assert.strictEqual(delay0, 100)
 
-    // retryNumber = 0: 2^0 * 100 = 100ms base
-    const delay0 = exponentialDelay(0)
-    assert.ok(delay0 >= 100)
-    assert.ok(delay0 <= 120) // 100 + 20% max jitter
+      // retryNumber = 1: 2^1 * 100 = 200ms base
+      const delay1 = computeExponentialBackOffDelay({ baseDelayMs, retryNumber: 1 })
+      assert.strictEqual(delay1, 200)
 
-    // retryNumber = 1: 2^1 * 100 = 200ms base
-    const delay1 = exponentialDelay(1)
-    assert.ok(delay1 >= 200)
-    assert.ok(delay1 <= 240) // 200 + 20% max jitter
+      // retryNumber = 2: 2^2 * 100 = 400ms base
+      const delay2 = computeExponentialBackOffDelay({ baseDelayMs, retryNumber: 2 })
+      assert.strictEqual(delay2, 400)
 
-    // retryNumber = 2: 2^2 * 100 = 400ms base
-    const delay2 = exponentialDelay(2)
-    assert.ok(delay2 >= 400)
-    assert.ok(delay2 <= 480) // 400 + 20% max jitter
+      // retryNumber = 3: 2^3 * 100 = 800ms base
+      const delay3 = computeExponentialBackOffDelay({ baseDelayMs, retryNumber: 3 })
+      assert.strictEqual(delay3, 800)
+    })
 
-    // retryNumber = 3: 2^3 * 100 = 800ms base
-    const delay3 = exponentialDelay(3)
-    assert.ok(delay3 >= 800)
-    assert.ok(delay3 <= 960) // 800 + 20% max jitter
-  })
+    await it('should calculate exponential delay with custom base delay', () => {
+      const delay0 = computeExponentialBackOffDelay({ baseDelayMs: 50, retryNumber: 0 })
+      assert.strictEqual(delay0, 50)
 
-  await it('should calculate exponential delay with custom delay factor', () => {
-    // Custom delayFactor = 50ms
-    const delay0 = exponentialDelay(0, 50)
-    assert.ok(delay0 >= 50)
-    assert.ok(delay0 <= 60) // 50 + 20% max jitter
+      const delay1 = computeExponentialBackOffDelay({ baseDelayMs: 50, retryNumber: 1 })
+      assert.strictEqual(delay1, 100)
 
-    const delay1 = exponentialDelay(1, 50)
-    assert.ok(delay1 >= 100)
-    assert.ok(delay1 <= 120)
+      const delay2 = computeExponentialBackOffDelay({ baseDelayMs: 200, retryNumber: 2 })
+      assert.strictEqual(delay2, 800) // 2^2 * 200 = 800
+    })
 
-    // Custom delayFactor = 200ms
-    const delay2 = exponentialDelay(2, 200)
-    assert.ok(delay2 >= 800) // 2^2 * 200 = 800
-    assert.ok(delay2 <= 960)
-  })
+    await it('should follow 2^n exponential growth pattern', () => {
+      const baseDelayMs = 100
+      const delays: number[] = []
+      for (let retry = 0; retry <= 5; retry++) {
+        delays.push(computeExponentialBackOffDelay({ baseDelayMs, retryNumber: retry }))
+      }
 
-  await it('should follow 2^n exponential growth pattern', () => {
-    // Verify that delays follow 2^n exponential growth pattern
-    const delayFactor = 100
+      // Each delay should be exactly double the previous (no jitter)
+      for (let i = 1; i < delays.length; i++) {
+        assert.strictEqual(delays[i] / delays[i - 1], 2)
+      }
+    })
 
-    // Collect base delays (without jitter consideration)
-    const delays: number[] = []
-    for (let retry = 0; retry <= 5; retry++) {
-      delays.push(exponentialDelay(retry, delayFactor))
-    }
+    await it('should include random jitter when jitterMs is specified', () => {
+      const delays = new Set<number>()
+      const baseDelayMs = 100
 
-    // Each delay should be approximately double the previous (accounting for jitter)
-    // delay[n+1] / delay[n] should be close to 2 (between 1.5 and 2.5 with jitter)
-    for (let i = 1; i < delays.length; i++) {
-      const ratio = delays[i] / delays[i - 1]
-      // Allow for jitter variance - ratio should be roughly 2x
-      assert.ok(ratio > 1.5)
-      assert.ok(ratio < 2.5)
-    }
-  })
+      for (let i = 0; i < 10; i++) {
+        delays.add(
+          Math.round(
+            computeExponentialBackOffDelay({
+              baseDelayMs,
+              jitterMs: 50,
+              retryNumber: 3,
+            })
+          )
+        )
+      }
 
-  await it('should include random jitter in exponential delay', () => {
-    // Run multiple times to verify jitter produces different values
-    const delays = new Set<number>()
-    const retryNumber = 3
-    const delayFactor = 100
+      // With jitter, we expect variation
+      assert.strictEqual(delays.size > 1, true)
+    })
 
-    // Collect 10 samples - with cryptographically secure random,
-    // we should get variation (not all identical)
-    for (let i = 0; i < 10; i++) {
-      delays.add(Math.round(exponentialDelay(retryNumber, delayFactor)))
-    }
+    await it('should keep jitter within specified range', () => {
+      const retryNumber = 4
+      const baseDelayMs = 100
+      const jitterMs = 200
+      const expectedBase = Math.pow(2, retryNumber) * baseDelayMs // 1600ms
 
-    // With jitter, we expect at least some variation
-    // (unlikely to get 10 identical values with secure random)
-    assert.ok(delays.size > 1)
-  })
+      for (let i = 0; i < 20; i++) {
+        const delay = computeExponentialBackOffDelay({ baseDelayMs, jitterMs, retryNumber })
+        const jitter = delay - expectedBase
 
-  await it('should keep jitter within 0-20% range of base delay', () => {
-    // For a given retry, jitter should add 0-20% of base delay
-    const retryNumber = 4
-    const delayFactor = 100
-    const baseDelay = Math.pow(2, retryNumber) * delayFactor // 1600ms
+        assert.strictEqual(jitter >= 0, true)
+        assert.strictEqual(jitter <= jitterMs, true)
+      }
+    })
 
-    // Run multiple samples to verify jitter range
-    for (let i = 0; i < 20; i++) {
-      const delay = exponentialDelay(retryNumber, delayFactor)
-      const jitter = delay - baseDelay
+    await it('should apply proportional jitter with jitterPercent', () => {
+      const retryNumber = 4
+      const baseDelayMs = 100
+      const jitterPercent = 0.2
+      const expectedBase = Math.pow(2, retryNumber) * baseDelayMs // 1600ms
+      const maxJitter = expectedBase * jitterPercent // 320ms
 
-      // Jitter should be non-negative and at most 20% of base delay
-      assert.ok(jitter >= 0)
-      assert.ok(jitter <= baseDelay * 0.2)
-    }
-  })
+      for (let i = 0; i < 20; i++) {
+        const delay = computeExponentialBackOffDelay({ baseDelayMs, jitterPercent, retryNumber })
+        const jitter = delay - expectedBase
 
-  await it('should handle edge cases (default retry, large retry, small factor)', () => {
-    // Default retryNumber (0)
-    const defaultRetry = exponentialDelay()
-    assert.ok(defaultRetry >= 100) // 2^0 * 100
-    assert.ok(defaultRetry <= 120)
+        assert.strictEqual(jitter >= 0, true)
+        assert.strictEqual(jitter <= maxJitter, true)
+      }
+    })
 
-    // Large retry number (verify no overflow issues)
-    const largeRetry = exponentialDelay(10, 100)
-    // 2^10 * 100 = 102400ms base
-    assert.ok(largeRetry >= 102400)
-    assert.ok(largeRetry <= 122880) // 102400 + 20%
+    await it('should prioritize jitterPercent over jitterMs when both provided', () => {
+      const retryNumber = 3
+      const baseDelayMs = 100
+      const expectedBase = Math.pow(2, retryNumber) * baseDelayMs // 800ms
 
-    // Very small delay factor
-    const smallFactor = exponentialDelay(2, 1)
-    assert.ok(smallFactor >= 4) // 2^2 * 1
-    assert.ok(smallFactor < 5) // 4 + 20%
-  })
+      for (let i = 0; i < 20; i++) {
+        const delay = computeExponentialBackOffDelay({
+          baseDelayMs,
+          jitterMs: 5000,
+          jitterPercent: 0.1,
+          retryNumber,
+        })
+        assert.strictEqual(delay >= expectedBase, true)
+        assert.strictEqual(delay <= expectedBase + expectedBase * 0.1, true)
+      }
+    })
 
-  await it('should calculate appropriate delays for WebSocket reconnection scenarios', () => {
-    // Simulate typical WebSocket reconnection delay sequence
-    const delayFactor = 100 // Default used in ChargingStation.reconnect()
+    await it('should handle edge cases (zero retry, large retry, small base)', () => {
+      const defaultRetry = computeExponentialBackOffDelay({ baseDelayMs: 100, retryNumber: 0 })
+      assert.strictEqual(defaultRetry, 100) // 2^0 * 100
 
-    // First reconnect attempt (retry 1)
-    const firstDelay = exponentialDelay(1, delayFactor)
-    assert.ok(firstDelay >= 200) // 2^1 * 100
-    assert.ok(firstDelay <= 240)
+      // Large retry number
+      const largeRetry = computeExponentialBackOffDelay({ baseDelayMs: 100, retryNumber: 10 })
+      assert.strictEqual(largeRetry, 102400) // 2^10 * 100
 
-    // After several failures (retry 5)
-    const fifthDelay = exponentialDelay(5, delayFactor)
-    assert.ok(fifthDelay >= 3200) // 2^5 * 100
-    assert.ok(fifthDelay <= 3840)
+      // Very small base
+      const smallBase = computeExponentialBackOffDelay({ baseDelayMs: 1, retryNumber: 2 })
+      assert.strictEqual(smallBase, 4) // 2^2 * 1
+    })
 
-    // Maximum practical retry (retry 10 = ~102 seconds)
-    const maxDelay = exponentialDelay(10, delayFactor)
-    assert.ok(maxDelay >= 102400) // ~102 seconds
-    assert.ok(maxDelay <= 122880)
+    await it('should respect maxRetries cap', () => {
+      const baseDelayMs = 100
+
+      // Without cap: 2^10 * 100 = 102400
+      const uncapped = computeExponentialBackOffDelay({ baseDelayMs, retryNumber: 10 })
+      assert.strictEqual(uncapped, 102400)
+
+      // With cap at 3: 2^3 * 100 = 800 (even though retryNumber is 10)
+      const capped = computeExponentialBackOffDelay({ baseDelayMs, maxRetries: 3, retryNumber: 10 })
+      assert.strictEqual(capped, 800)
+    })
+
+    await it('should calculate appropriate delays for WebSocket reconnection scenarios', () => {
+      const baseDelayMs = 100
+
+      const firstDelay = computeExponentialBackOffDelay({ baseDelayMs, retryNumber: 1 })
+      assert.strictEqual(firstDelay, 200) // 2^1 * 100
+
+      const fifthDelay = computeExponentialBackOffDelay({ baseDelayMs, retryNumber: 5 })
+      assert.strictEqual(fifthDelay, 3200) // 2^5 * 100
+
+      const maxDelay = computeExponentialBackOffDelay({ baseDelayMs, retryNumber: 10 })
+      assert.strictEqual(maxDelay, 102400) // ~102 seconds
+    })
   })
 
   await it('should return timestamped log prefix with optional string', () => {
     const result = logPrefix()
     assert.strictEqual(typeof result, 'string')
-    assert.ok(result.length > 0)
+    assert.strictEqual(result.length > 0, true)
     const withPrefix = logPrefix(' Test |')
-    assert.ok(withPrefix.includes(' Test |'))
+    assert.strictEqual(withPrefix.includes(' Test |'), true)
   })
 
   await it('should deep merge objects with source overriding target', () => {
@@ -753,17 +777,17 @@ await describe('Utils', async () => {
 
   await it('should generate random float rounded to specified scale', () => {
     const result = getRandomFloatRounded(10, 0, 2)
-    assert.ok(result >= 0)
-    assert.ok(result <= 10)
+    assert.strictEqual(result >= 0, true)
+    assert.strictEqual(result <= 10, true)
     // Check rounding to 2 decimal places
     const decimalStr = result.toString()
     if (decimalStr.includes('.')) {
-      assert.ok(decimalStr.split('.')[1].length <= 2)
+      assert.strictEqual(decimalStr.split('.')[1].length <= 2, true)
     }
     // Default scale
     const defaultScale = getRandomFloatRounded(10, 0)
-    assert.ok(defaultScale >= 0)
-    assert.ok(defaultScale <= 10)
+    assert.strictEqual(defaultScale >= 0, true)
+    assert.strictEqual(defaultScale <= 10, true)
   })
 
   await it('should generate fluctuated random float within percentage range', () => {
@@ -771,8 +795,8 @@ await describe('Utils', async () => {
     assert.strictEqual(getRandomFloatFluctuatedRounded(100, 0), 100)
     // 10% fluctuation: 100 ± 10
     const result = getRandomFloatFluctuatedRounded(100, 10)
-    assert.ok(result >= 90)
-    assert.ok(result <= 110)
+    assert.strictEqual(result >= 90, true)
+    assert.strictEqual(result <= 110, true)
     // Invalid fluctuation percent
     assert.throws(() => {
       getRandomFloatFluctuatedRounded(100, -1)
@@ -782,8 +806,8 @@ await describe('Utils', async () => {
     }, RangeError)
     // Negative static value with fluctuation
     const negResult = getRandomFloatFluctuatedRounded(-100, 10)
-    assert.ok(negResult >= -110)
-    assert.ok(negResult <= -90)
+    assert.strictEqual(negResult >= -110, true)
+    assert.strictEqual(negResult <= -90, true)
   })
 
   await it('should detect Cloud Foundry environment from VCAP_APPLICATION', () => {
@@ -812,5 +836,88 @@ await describe('Utils', async () => {
     assert.throws(() => {
       callback()
     }, error)
+  })
+
+  await describe('truncateId', async () => {
+    await it('should return identifier unchanged when short', () => {
+      const result = truncateId('ABCD')
+      assert.strictEqual(result, 'ABCD')
+    })
+
+    await it('should truncate long identifier with ellipsis', () => {
+      const result = truncateId('ABCDEFGHIJKLMNOP')
+      assert.strictEqual(result, 'ABCDEFGH...')
+    })
+  })
+
+  await describe('promiseWithTimeout', async () => {
+    await it('should resolve with the promise value when it settles before timeout', async () => {
+      const result = await promiseWithTimeout(Promise.resolve(42), 1000, 'Timeout')
+      assert.strictEqual(result, 42)
+    })
+
+    await it('should reject with timeout Error when promise exceeds timeout', async t => {
+      await withMockTimers(t, ['setTimeout'], async () => {
+        const timeoutError = new Error('Operation timed out')
+        const racePromise = promiseWithTimeout(
+          // eslint-disable-next-line @typescript-eslint/no-empty-function
+          new Promise<never>(() => {}),
+          500,
+          timeoutError
+        )
+        t.mock.timers.tick(500)
+        await assert.rejects(racePromise, (error: Error) => {
+          assert.strictEqual(error, timeoutError)
+          return true
+        })
+      })
+    })
+
+    await it('should convert string timeoutError to Error on timeout', async t => {
+      await withMockTimers(t, ['setTimeout'], async () => {
+        const racePromise = promiseWithTimeout(
+          // eslint-disable-next-line @typescript-eslint/no-empty-function
+          new Promise<never>(() => {}),
+          500,
+          'timed out'
+        )
+        t.mock.timers.tick(500)
+        await assert.rejects(racePromise, (error: Error) => {
+          assert.ok(error instanceof Error)
+          assert.strictEqual(error.message, 'timed out')
+          return true
+        })
+      })
+    })
+
+    await it('should preserve original rejection when promise rejects before timeout', async () => {
+      const originalError = new TypeError('Custom typed error')
+      await assert.rejects(
+        promiseWithTimeout(Promise.reject(originalError), 10000, 'Should not see this'),
+        (error: Error) => {
+          assert.strictEqual(error, originalError)
+          assert.ok(error instanceof TypeError)
+          return true
+        }
+      )
+    })
+  })
+
+  await describe('getMessageTypeString', async () => {
+    await it('should return "request" for MessageType.CALL_MESSAGE', () => {
+      assert.strictEqual(getMessageTypeString(MessageType.CALL_MESSAGE), 'request')
+    })
+
+    await it('should return "response" for MessageType.CALL_RESULT_MESSAGE', () => {
+      assert.strictEqual(getMessageTypeString(MessageType.CALL_RESULT_MESSAGE), 'response')
+    })
+
+    await it('should return "error" for MessageType.CALL_ERROR_MESSAGE', () => {
+      assert.strictEqual(getMessageTypeString(MessageType.CALL_ERROR_MESSAGE), 'error')
+    })
+
+    await it('should return "unknown" for undefined', () => {
+      assert.strictEqual(getMessageTypeString(undefined), 'unknown')
+    })
   })
 })

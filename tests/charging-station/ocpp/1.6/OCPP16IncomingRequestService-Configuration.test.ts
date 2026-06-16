@@ -12,8 +12,10 @@ import type {
   GetConfigurationRequest,
 } from '../../../../src/types/index.js'
 
-import { OCPP16StandardParametersKey } from '../../../../src/types/index.js'
-import { OCPP16ConfigurationStatus } from '../../../../src/types/ocpp/1.6/Responses.js'
+import {
+  OCPP16ConfigurationStatus,
+  OCPP16StandardParametersKey,
+} from '../../../../src/types/index.js'
 import { standardCleanup } from '../../../helpers/TestLifecycleHelpers.js'
 import {
   createOCPP16IncomingRequestTestContext,
@@ -126,7 +128,7 @@ await describe('OCPP16IncomingRequestService — Configuration', async () => {
     // Assert
     assert.notStrictEqual(response.configurationKey, undefined)
     assert.notStrictEqual(response.unknownKey, undefined)
-    assert.ok(response.configurationKey.length >= 2)
+    assert.ok(response.configurationKey.length >= 2, 'should return at least 2 configuration keys')
     const heartbeatKey = response.configurationKey.find(
       k => k.key === (OCPP16StandardParametersKey.HeartbeatInterval as string)
     )
