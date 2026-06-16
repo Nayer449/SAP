@@ -1,0 +1,41 @@
+{
+  "baseName": "CS-BASIC",
+  "chargePointModel": "Simulator 2C AC",
+  "chargePointVendor": "Ovomaltin",
+  "power": 44000,
+  "powerUnit": "W",
+  "powerSharedByConnectors": true,
+  "currentOutType": "AC",
+  "numberOfConnectors": 2,
+  "randomConnectors": false,
+  "Configuration": {
+    "configurationKey": [
+      { "key": "MeterValuesSampledData", "readonly": false, "value": "Energy.Active.Import.Register,Voltage" },
+      { "key": "MeterValueSampleInterval", "readonly": false, "value": "30" },
+      { "key": "SupportedFeatureProfiles", "readonly": true, "value": "Core,FirmwareManagement,LocalAuthListManagement,SmartCharging,RemoteTrigger,Reservation" },
+      { "key": "LocalAuthListEnabled", "readonly": false, "value": "false" },
+      { "key": "AuthorizeRemoteTxRequests", "readonly": false, "value": "false" },
+      { "key": "WebSocketPingInterval", "readonly": false, "value": "60" },
+      { "key": "ReserveConnectorZeroSupported", "readonly": false, "value": "false" }
+    ]
+  },
+  "AutomaticTransactionGenerator": {
+    "enable": false,
+    "minDuration": 60,
+    "maxDuration": 80,
+    "minDelayBetweenTwoTransactions": 15,
+    "maxDelayBetweenTwoTransactions": 30,
+    "probabilityOfStart": 1,
+    "stopAfterHours": 0.3,
+    "requireAuthorize": false
+  },
+  "Connectors": {
+    "0": {},
+    "1": { "bootStatus": "Available", "MeterValues": [{ "unit": "Wh", "context": "Sample.Periodic" }] },
+    "2": { "bootStatus": "Available", "MeterValues": [{ "unit": "Wh", "context": "Sample.Periodic" }] }
+  },
+  "autoStart": true,
+  "automaticTransactionGeneratorPersistentConfiguration": false,
+  "ocppPersistentConfiguration": false,
+  "stationInfoPersistentConfiguration": false
+}
