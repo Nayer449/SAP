@@ -33,7 +33,7 @@
       ]
     },
     "authentication": {
-      "enabled": true,
+      "enabled": false,
       "type": "protocol-basic-auth"
     }
   },
