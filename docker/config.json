@@ -32,7 +32,6 @@
         "ocpp-test-platform-web-58kt.vercel.app"
       ]
     },
-   "trustedProxies": ["loopback", "uniquelocal"],
     "authentication": {
       "enabled": false,
       "type": "protocol-basic-auth"
