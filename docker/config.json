@@ -25,6 +25,12 @@
       "trustProxy": true,
       "port": 10000
     },
+    "accessPolicy": {
+      "allowedHosts": [
+        "sap-et0z.onrender.com",
+        "ocpp-test-platform-web-58kt.vercel.app"
+      ]
+    },
     "type": "ws",
     "authentication": {
       "enabled": false,
