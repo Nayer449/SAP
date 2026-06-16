@@ -26,7 +26,6 @@
       "port": 10000,
       "trustProxy": true
     },
-   "trustedProxies": ["loopback", "uniquelocal"],
     "accessPolicy": {
       "allowedHosts": [
         "sap-et0z.onrender.com",
