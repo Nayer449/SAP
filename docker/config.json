@@ -27,7 +27,8 @@
     },
     "type": "ws",
     "authentication": {
-      "enabled": false
+      "enabled": false,
+      "type": "protocol-basic-auth"
     }
   },
   "stationTemplateUrls": [
