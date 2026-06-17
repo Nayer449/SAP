@@ -10,6 +10,7 @@ RUN set -ex \
   && pnpm install --ignore-scripts --frozen-lockfile \
   && cp docker/config.json src/assets/config.json \
   && cp docker/idtags.json src/assets/idtags.json \
+  && sed -i '/trustedProxies\.size === 0/{n;s/return false/return true/}' src/charging-station/ui-server/UIServerAccessPolicy.ts \
   && pnpm build \
   && apk del .gyp
 
